@@ -210,54 +210,79 @@ Result<IBConfig::Network> IBConfig::Network::from(std::string_view str) {
 const std::vector<IBDevice::Ptr> &IBDevice::all() { return IBManager::instance().allDevices(); }
 
 Result<std::vector<IBDevice::Ptr>> IBDevice::openAll(const IBConfig &config) {
+  // 获取IB设备与网络设备的映射关系
+  // 调用ibdev2netdev命令获取系统中IB设备与网络设备的对应关系
+  // 这对于确定IB设备的网络地址和区域非常重要
   auto ib2net = ibdev2netdev();
   if (ib2net.hasError()) {
+    // 如果获取失败，可能是在容器环境中运行，记录警告并使用空映射继续
     XLOGF(WARN, "Failed to load ibdev2netdev, maybe running in container.");
     ib2net = std::map<IBDevPort, NetDev>();
   }
 
+  // 加载系统网络接口信息
+  // 获取所有网络接口的地址信息，用于后续确定IB设备的网络地址
   auto ifaddrs = IfAddrs::load();
   if (ifaddrs.hasError()) {
+    // 如果加载失败，记录错误并返回，因为没有网络接口信息无法继续
     XLOGF(ERR, "Failed to load ifaddrs, error {}", ifaddrs.error());
     return makeError(RPCCode::kIBInitFailed);
   }
 
+  // 获取系统中所有的IB设备列表
+  // 调用ibv_get_device_list获取所有可用的RDMA设备
   int deviceCnt = 0;
   auto deviceList = ibv_get_device_list(&deviceCnt);
   if (deviceList == nullptr) {
+    // 如果获取设备列表失败，记录错误并返回
     XLOGF(ERR, "Failed to load verbs device list, errno {}", errno);
     return makeError(RPCCode::kIBInitFailed, "Failed to load verbs devices.");
   }
+  // 使用SCOPE_EXIT确保在函数退出时释放设备列表资源
   SCOPE_EXIT { ibv_free_device_list(deviceList); };
   if (deviceCnt <= 0) {
+    // 如果没有找到RDMA设备，记录警告并返回错误
     XLOGF(WARN, "No RDMA devices!!!");
     return makeError(RPCCode::kIBInitFailed, "No usable RDMA devices.");
   }
 
+  // 遍历设备列表，初始化每个设备
   std::vector<IBDevice::Ptr> devices;
   for (int idx = 0; idx < deviceCnt; idx++) {
     auto dev = deviceList[idx];
-    auto devId = devices.size();
+    auto devId = devices.size();  // 使用当前设备列表大小作为设备ID
     auto devName = ibv_get_device_name(dev);
 
+    // 打开并初始化设备
+    // 调用IBDevice::open方法初始化设备上下文、保护域等资源
     auto device = IBDevice::open(dev, devId, *ib2net, *ifaddrs, config);
     if (device.hasError()) {
       if (config.skip_unusable_device()) {
+        // 如果配置允许跳过不可用设备，记录错误并继续处理下一个设备
         XLOGF(CRITICAL, "Failed to open IBDevice {}, error {}, skip it", devName, device.error());
         continue;
       }
+      // 如果配置不允许跳过不可用设备，记录错误并返回
       XLOGF(ERR, "IBDevice failed to open device {}, error {}", devName, device.error());
       return makeError(device.error());
     }
+    
+    // 检查设备是否有可用端口
     if (device.value()->ports().empty()) {
+      // 如果设备没有可用端口，记录信息并跳过该设备
       XLOGF(INFO, "IBDevice skip {} because it doesn't have available ports.", devName);
       continue;
     }
+    
+    // 添加设备到设备列表
     XLOGF(INFO, "IBDevice add {}, id {}, {} available ports", devName, devId, device.value()->ports().size());
     devices.emplace_back(std::move(*device));
   }
 
+  // 检查设备数量是否超过最大限制
   if (devices.size() > kMaxDeviceCnt) {
+    // 如果设备数量超过限制，记录错误并返回
+    // 这时需要通过device_filter配置项来限制使用的设备
     XLOGF(CRITICAL,
           "too many ibdevices {} > kMaxDeviceCnt {}, please specify device_filter",
           devices.size(),
@@ -265,6 +290,7 @@ Result<std::vector<IBDevice::Ptr>> IBDevice::openAll(const IBConfig &config) {
     return makeError(StatusCode::kInvalidArg);
   }
 
+  // 返回初始化好的设备列表
   return devices;
 }
 
@@ -273,57 +299,93 @@ Result<IBDevice::Ptr> IBDevice::open(ibv_device *dev,
                                      std::map<std::pair<std::string, uint8_t>, std::string> ib2net,
                                      std::multimap<std::string, IfAddrs::Addr> ifaddrs,
                                      const IBConfig &config) {
+  // 创建IBDevice实例
+  // 使用智能指针管理设备生命周期
   IBDevice::Ptr device(new IBDevice());
+  
+  // 设置设备ID和名称
   device->devId_ = devId;
   device->name_ = ibv_get_device_name(dev);
+  
+  // 打开设备上下文
+  // 设备上下文是与IB设备交互的主要接口
   device->context_.reset(ibv_open_device(dev));
   if (!device->context_) {
+    // 如果打开设备上下文失败，记录错误并返回
     XLOGF(ERR, "IBDevice failed to open {}, errno {}", device->name_, errno);
     return makeError(RPCCode::kIBInitFailed);
   }
+  
+  // 分配保护域(Protection Domain)
+  // 保护域用于隔离不同应用程序的资源，提高安全性
   device->pd_.reset(ibv_alloc_pd(device->context_.get()));
   if (!device->pd_) {
+    // 如果分配保护域失败，记录错误并返回
     XLOGF(ERR, "IBDevice failed to alloc pd for {}, errno {}", device->name_, errno);
     return makeError(RPCCode::kIBInitFailed);
   }
+  
+  // 查询设备属性
+  // 获取设备的能力和限制信息，如最大队列对数、最大内存区域数等
   if (auto ret = ibv_query_device(device->context_.get(), &device->attr_); ret != 0) {
+    // 如果查询设备属性失败，记录错误并返回
     XLOGF(ERR, "IBDevice failed to query device {}, errno {}", device->name_, errno);
     return makeError(RPCCode::kIBInitFailed);
   }
 
+  // 创建设备过滤函数
+  // 根据配置的device_filter确定是否使用特定设备
   auto filter = [&filter = config.device_filter()](std::string name) {
     return filter.empty() || std::find(filter.begin(), filter.end(), name) != filter.end();
   };
 
+  // 确定要初始化的端口集合
+  // 根据设备过滤条件选择要初始化的端口
   std::set<uint8_t> ports;
   for (uint8_t portNum = 1; portNum <= device->attr_.phys_port_cnt; portNum++) {
+    // 查找端口对应的网络设备
     auto iter = ib2net.find({device->name_, portNum});
     auto netdev = (iter != ib2net.end()) ? std::optional(iter->second) : std::nullopt;
+    
+    // 如果设备名称在过滤列表中，或者网络设备名称在过滤列表中，则添加该端口
     if (filter(device->name_) || (netdev && filter(*netdev))) {
       ports.emplace(portNum);
     } else {
+      // 否则跳过该端口
       XLOGF(INFO, "Skip device {}, port {} because it's not in device filter.", device->name_, portNum);
     }
   }
 
+  // 设置异步事件文件描述符为非阻塞模式
+  // 这样可以在事件循环中处理异步事件而不会阻塞
   auto flags = fcntl(device->context()->async_fd, F_GETFL);
   auto ret = fcntl(device->context()->async_fd, F_SETFL, flags | O_NONBLOCK);
   if (ret < 0) {
+    // 如果设置非阻塞模式失败，记录错误并返回
     XLOGF(ERR, "IBDevice {} failed to set async fd to NONBLOCK.", device->name());
     return makeError(RPCCode::kIBInitFailed);
   }
 
+  // 遍历所有选定的端口，初始化每个端口
   for (uint8_t portNum = 1; portNum <= device->attr_.phys_port_cnt; portNum++) {
+    // 如果端口不在选定集合中，跳过
     if (!ports.contains(portNum)) {
       continue;
     }
 
+    // 查询端口属性
+    // 获取端口的链路层类型、状态、MTU等信息
     ibv_port_attr portAttr;
     if (auto ret = ibv_query_port(device->context_.get(), portNum, &portAttr); ret != 0) {
+      // 如果查询端口属性失败，记录错误并返回
       XLOGF(ERR, "IBDevice failed to query port {} of device {}, errno {}", portNum, device->name_, ret);
       return makeError(RPCCode::kIBInitFailed);
     }
+    
+    // 检查端口链路层类型
+    // 只支持以太网(RoCE)和InfiniBand类型的端口
     if (portAttr.link_layer != IBV_LINK_LAYER_ETHERNET && portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND) {
+      // 如果链路层类型不支持，记录警告并跳过该端口
       XLOGF(WARN,
             "IBDevice skip port {} of device {}, linklayer {} is not RoCE or INFINIBAND.",
             portNum,
@@ -331,6 +393,9 @@ Result<IBDevice::Ptr> IBDevice::open(ibv_device *dev,
             portAttr.link_layer);
       continue;
     }
+    
+    // 检查端口状态
+    // 如果端口不活跃且配置要求跳过非活动端口，则跳过该端口
     bool inactive = (portAttr.state != IBV_PORT_ACTIVE && portAttr.state != IBV_PORT_ACTIVE_DEFER);
     XLOGF_IF(WARN,
              inactive,
@@ -343,20 +408,31 @@ Result<IBDevice::Ptr> IBDevice::open(ibv_device *dev,
       continue;
     }
 
+    // 创建端口结构并填充信息
     Port port;
+    // 获取端口网络地址
     port.addrs = getIBPortAddrs(ib2net, ifaddrs, device->name_, portNum);
+    // 根据网络地址确定端口所属的网络区域
     port.zones = getZonesByAddrs(port.addrs, config, device->name_, portNum);
+    // 保存端口属性
     port.attr = portAttr;
+    
+    // 检查网络区域
+    // 如果不允许未知区域且端口只属于未知区域，则返回错误
     if (!config.allow_unknown_zone() && port.zones == std::set<std::string>{std::string(IBConfig::kUnknownZone)}) {
       XLOGF(CRITICAL, "IBDevice {}:{}'s zone is unknown!!!", device->name_, portNum);
       return makeError(StatusCode::kInvalidConfig);
     }
+    
+    // 对于RoCE端口，查询RoCE v2 GID
     std::optional<ibv_gid> rocev2Gid;
     if (portAttr.link_layer == IBV_LINK_LAYER_ETHERNET) {
       auto result = queryRoCEv2GID(device->context(), portNum);
       RETURN_ON_ERROR(result);
       rocev2Gid = result->first;
     }
+    
+    // 记录端口信息
     XLOGF(INFO,
           "IBDevice {} add active port {}, linklayer {}, addrs {}, zones {}, RoCE v2 GID {}",
           device->name_,
@@ -365,9 +441,12 @@ Result<IBDevice::Ptr> IBDevice::open(ibv_device *dev,
           fmt::join(port.addrs.begin(), port.addrs.end(), ";"),
           fmt::join(port.zones.begin(), port.zones.end(), ";"),
           OptionalFmt(rocev2Gid));
+    
+    // 将端口添加到设备的端口映射中
     device->ports_[portNum] = std::move(port);
   }
 
+  // 返回初始化好的设备
   return device;
 }
 
@@ -667,10 +746,14 @@ IBManager::IBManager() = default;
 IBManager::~IBManager() { reset(); }
 
 Result<Void> IBManager::startImpl(IBConfig config) {
+  // 检查是否已经初始化，避免重复初始化
   if (inited_) {
     return Void{};
   }
 
+  // 处理fork安全模式
+  // 在多进程环境下，如果子进程会使用IB设备，需要调用ibv_fork_init确保安全
+  // 这是一个全局设置，只需要初始化一次
   static bool forkInited = false;
   if (!forkInited && config.fork_safe()) {
     auto ret = ibv_fork_init();
@@ -682,74 +765,137 @@ Result<Void> IBManager::startImpl(IBConfig config) {
     forkInited = true;
   }
 
+  // 保存配置
   config_ = config;
+  
+  // 调用IBDevice::openAll打开所有IB设备
+  // 这个过程会发现系统中的IB设备，初始化设备上下文和保护域，并查询设备属性
   auto devices = IBDevice::openAll(config_);
   if (devices.hasError()) {
+    // 如果打开设备失败，记录错误并返回
     XLOGF(ERR, "Failed to open all IBDevices, error {}", devices.error());
     return makeError(devices.error());
   } else if (devices->empty()) {
+    // 如果没有找到可用设备，根据配置决定是否允许继续
     if (config_.allow_no_usable_devices()) {
+      // 如果配置允许没有可用设备，仅记录警告
       XLOGF(WARN, "IBManager can't find available device!");
     } else {
+      // 如果配置不允许没有可用设备，记录错误并返回
       XLOGF(ERR, "IBManager can't find available device!");
       return makeError(RPCCode::kIBDeviceNotFound);
     }
   }
 
+  // 保存设备列表
   devices_ = std::move(*devices);
+  
+  // 创建事件循环
+  // 事件循环用于处理异步事件，如设备状态变化、套接字事件等
   eventLoop_ = EventLoop::create();
   auto result = eventLoop_->start("IBManager");
   RETURN_ON_ERROR(result);
 
+  // 创建套接字管理器
+  // 套接字管理器负责管理IB套接字的生命周期和资源释放
   socketManager_ = IBSocketManager::create();
   if (!socketManager_) {
     return makeError(RPCCode::kIBInitFailed, "Failed to create IBSocketManager");
   }
+  // 将套接字管理器添加到事件循环中，监听读写和边缘触发事件
   eventLoop_->add(socketManager_, (EPOLLIN | EPOLLOUT | EPOLLET));
 
+  // 创建后台运行器
+  // 后台运行器负责定期检查设备状态，更新端口属性等
   devBgRunner_ = IBDevice::BackgroundRunner::create();
   if (!devBgRunner_) {
     return makeError(RPCCode::kIBInitFailed, "Failed to create IBDevice::BackgroundRunner");
   }
+  // 将后台运行器添加到事件循环中，监听读写和边缘触发事件
   eventLoop_->add(devBgRunner_, (EPOLLIN | EPOLLOUT | EPOLLET));
 
+  // 为每个设备创建异步事件处理器
+  // 遍历所有设备，设置事件处理和网络区域映射
   for (const auto &dev : devices_) {
+    // 创建异步事件处理器，用于处理设备异步事件（如端口状态变化）
     auto handler = std::make_shared<IBDevice::AsyncEventHandler>(dev);
+    // 将事件处理器添加到事件循环中，监听读写和边缘触发事件
     eventLoop_->add(handler, (EPOLLIN | EPOLLOUT | EPOLLET));
+    // 保存事件处理器，防止被提前释放
     devEventHandlers_.push_back(handler);
+    
+    // 遍历设备的所有端口，建立网络区域到端口的映射
     for (const auto &port : dev->ports()) {
+      // 确保端口有网络区域，否则终止程序
       XLOGF_IF(FATAL, port.second.zones.empty(), "Zone is empty for port {}:{}", dev->name(), port.first);
+      
+      // 遍历端口的所有网络区域，建立区域到端口的映射
       for (const auto &zone : port.second.zones) {
+        // 跳过未知区域
         if (zone != IBConfig::kUnknownZone) {
+          // 将网络区域映射到设备端口
+          // 这个映射用于根据网络区域快速找到对应的设备端口
           zone2port_.emplace(zone, std::pair<IBDevice::Ptr, uint8_t>{dev, port.first});
         }
       }
+      
+      // 设置设备计数监控指标
+      // 这用于监控系统中活动设备的数量
       deviceCnt.set(1, getPortTags(*dev, port.first, port.second.zones));
     }
   }
 
+  // 标记初始化完成
   inited_ = true;
   return Void{};
 }
 
 void IBManager::reset() {
+  // 首先将初始化标志设置为false，表示管理器已不再处于初始化状态
+  // 这样可以防止其他线程继续使用已经开始清理的管理器
   inited_ = false;
 
+  // 停止并清理套接字管理器
+  // 套接字管理器负责管理所有IB套接字的生命周期
   if (socketManager_) {
+    // stopAndJoin会等待所有正在关闭的套接字完成清理
+    // 这确保了所有套接字资源都被正确释放
     socketManager_->stopAndJoin();
+    // 重置智能指针，释放套接字管理器
     socketManager_.reset();
   }
+  
+  // 停止并清理事件循环
+  // 事件循环负责处理所有异步事件，包括设备状态变化、套接字事件等
   if (eventLoop_) {
+    // stopAndJoin会等待事件循环线程退出
+    // 这确保了所有事件处理器都不再被调用
     eventLoop_->stopAndJoin();
+    // 重置智能指针，释放事件循环
     eventLoop_.reset();
   }
 
+  // 清空设备列表
+  // 由于使用了智能指针管理设备，这里的clear会触发设备资源的释放
+  // 包括设备上下文、保护域等IB资源
   devices_.clear();
+  
+  // 清空网络区域到端口的映射
+  // 这个映射用于根据网络区域快速找到对应的设备端口
   zone2port_.clear();
 }
 
 void IBManager::closeImpl(IBSocket::Ptr socket) {
+  // 检查套接字管理器是否存在
+  // 如果管理器已经被销毁，则无法关闭套接字
   if (socketManager_) {
+    // 将套接字交给套接字管理器关闭
+    // 套接字管理器会负责套接字的优雅关闭和资源释放
+    // 这包括：
+    // 1. 创建一个Drainer对象来处理套接字的关闭过程
+    // 2. 将Drainer添加到事件循环中，监听套接字事件
+    // 3. 设置超时机制，确保套接字能够在指定时间内关闭
+    // 4. 完成关闭后释放套接字资源
     socketManager_->close(std::move(socket));
   }
 }
