@@ -74,7 +74,7 @@ class ApplicationBase {
    * @param flags 解析结果存储容器
    * @return 解析结果
    */
-  static Result<Void> parseFlags(std::string_view prefix, int *argc, char ***argv, ConfigFlags &flags);
+  static Result<Void> (std::sparseFlagstring_view prefix, int *argc, char ***argv, ConfigFlags &flags);
 
   /**
    * @brief 初始化配置

@@ -88,7 +88,7 @@ class ServerLauncher : public ServerLauncherBase {
     XLOGF_IF(FATAL, !ibResult, "Failed to start IBManager: {}", ibResult.error());
     XLOGF(INFO, "IBDevice inited");
 
-    // 创建远程配置获取器
+    // 创建远程配置获取器（运用函数模板make_unique，创建RemoteConfigFetcher实例）
     fetcher_ = std::make_unique<RemoteConfigFetcher>(launcherConfig_);
     return Void{};
   }

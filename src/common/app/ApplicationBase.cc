@@ -110,11 +110,11 @@ namespace hf3fs {
   int ApplicationBase::run(int argc, char *argv[]) {
     Thread::blockInterruptSignals();
 
-    // 解析命令行参数
+    // 解析命令行参数（实际没用）
     auto parseFlagsRes = parseFlags(&argc, &argv);
     XLOGF_IF(FATAL, !parseFlagsRes, "Parse flags failed: {}", parseFlagsRes.error());
 
-    // 初始化folly库
+    // 初始化folly库（自带解析命令行参数）
     folly::init(&argc, &argv);
 
     // 如果指定了release_version标志，则打印版本信息并退出

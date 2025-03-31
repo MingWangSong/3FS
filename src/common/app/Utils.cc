@@ -226,7 +226,7 @@ void initCommonComponents(const ApplicationBase::Config &cfg, const String &serv
 
   XLOGF(INFO, "Init waiter singleton {}", fmt::ptr(&net::Waiter::instance()));
 
-  // 将节点信息存储监控服务
+  // 启动监控服务
   auto monitorResult =
       monitor::Monitor::start(cfg.monitor(), nodeId == 0 ? "" : fmt::format("Node_{}", nodeId.toUnderType()));
   XLOGF_IF(FATAL, !monitorResult, "Start monitor failed: {}", monitorResult.error());
