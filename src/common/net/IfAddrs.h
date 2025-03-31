@@ -40,6 +40,9 @@ class IfAddrs {
  private:
   static Result<Map> loadOnce() {
     Map net2addr;
+    // getifaddrs是一个系统调用函数,用于获取系统中所有网络接口的信息
+    // 它会将网络接口信息填充到ifaddrList链表中
+    // 返回0表示成功,返回-1表示失败
     struct ifaddrs *ifaddrList;
     if (getifaddrs(&ifaddrList)) {
       XLOGF(ERR, "Failed to call getifaddrs, errno {}", errno);

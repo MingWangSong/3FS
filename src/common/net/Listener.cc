@@ -66,6 +66,11 @@ Result<Void> Listener::setup() {
   auto &filters = config_.filter_list();
   for (auto [name, addr] : nics.value()) {
     if (addr.up && (filters.empty() || filters.count(name) != 0) && checkNicType(name, networkType_)) {
+      // 这行代码将一个新的地址添加到监听地址列表中:
+      // 1. addr.ip.toLong() - 将IP地址转换为长整型数值
+      // 2. config_.listen_port() - 获取配置的监听端口号
+      // 3. networkType_ == Address::LOCAL ? Address::TCP : networkType_ - 
+      //    如果网络类型是LOCAL,则使用TCP类型,否则使用原始的networkType_
       addressList_.push_back(Address{addr.ip.toLong(),
                                      config_.listen_port(),
                                      networkType_ == Address::LOCAL ? Address::TCP : networkType_});
