@@ -26,8 +26,33 @@ class InvalidSolution(Exception):
 
 
 class DataPlacementModel(object):
+  """
+  数据放置模型类，用于解决分布式存储系统中的数据放置问题
+  
+  核心参数说明:
+  - chain_table_type: 存储类型，可选"EC"(纠删码)或"CR"(链式复制)
+  - num_nodes: 存储节点数量
+  - group_size: 每个数据组的节点数量(EC中的k值或CR中的副本数)
+  - num_groups: 数据组数量
+  - num_targets_per_disk: 每个磁盘上的存储目标数量
+  - min_targets_per_disk: 每个磁盘最少存储目标数量
+  - bibd_only: 是否只生成平衡不完全区组设计
+  - qlinearize: 是否对二次方程进行线性化
+  - relax_lb: 对等节点恢复流量的下界松弛值
+  - relax_ub: 对等节点恢复流量的上界松弛值
+  """
 
   def __init__(self, chain_table_type: Literal["EC", "CR"], num_nodes, group_size, num_groups=None, num_targets_per_disk=None, min_targets_per_disk=1, bibd_only=False, qlinearize=False, relax_lb=1, relax_ub=0):
+    """
+    初始化数据放置模型
+    
+    核心规则:
+    1. 如果未指定num_targets_per_disk，则通过find_params方法计算合适的参数
+    2. 对于EC模式，每个数据组需要k个节点存储
+    3. 对于CR模式，每个数据组需要k个节点进行链式复制
+    4. 确保每个磁盘的存储目标数量不超过限制
+    5. 确保数据组大小与节点数量匹配
+    """
     if num_targets_per_disk is None:
       num_nodes, num_groups, num_targets_per_disk, group_size = DataPlacementModel.find_params(num_nodes, group_size, min_r=min_targets_per_disk, bibd_only=bibd_only)
     self.chain_table_type = chain_table_type
@@ -53,58 +78,80 @@ class DataPlacementModel(object):
 
   @property
   def v(self):
+    """存储节点数量"""
     return self.num_nodes
 
   @property
   def b(self):
+    """数据组数量"""
     return self.num_groups
 
   @property
   def r(self):
+    """每个磁盘上的存储目标数量"""
     return self.num_targets_per_disk
 
   @property
   def k(self):
+    """每个数据组的节点数量"""
     return self.group_size
 
   @property
   def λ(self):
+    """每个对等节点上的最大恢复流量"""
     return self.max_recovery_traffic_on_peer
 
   @property
   def num_targets_used(self):
+    """已使用的存储目标总数"""
     return self.num_groups * self.group_size
 
   @property
   def num_targets_total(self):
+    """所有磁盘上的存储目标总数"""
     return self.num_nodes * self.num_targets_per_disk
 
   @property
   def all_targets_used(self):
+    """是否所有存储目标都被使用"""
     return self.num_targets_used == self.num_targets_total
 
   @property
   def balanced_peer_traffic(self):
+    """是否所有对等节点的恢复流量平衡"""
     return self.all_targets_used and self.sum_recovery_traffic_per_failure % (self.num_nodes-1) == 0
 
   @property
   def recovery_traffic_factor(self):
+    """恢复流量因子，EC模式为k-1，CR模式为1"""
     return (self.group_size - 1) if self.chain_table_type == "EC" else 1
 
   @property
   def sum_recovery_traffic_per_failure(self):
+    """每个故障情况下的总恢复流量"""
     return self.num_targets_per_disk * self.recovery_traffic_factor
 
   @property
   def max_recovery_traffic_on_peer(self):
+    """每个对等节点上的最大恢复流量"""
     return math.ceil(self.sum_recovery_traffic_per_failure / (self.num_nodes-1))
 
   @property
   def balanced_incomplete_block_design(self):
+    """是否为平衡不完全区组设计"""
     return self.bibd_only and self.balanced_peer_traffic and self.relax_ub == 0
 
   @staticmethod
   def find_params(v, k, min_r=1, max_r=100, bibd_only=False):
+    """
+    计算合适的参数组合
+    
+    核心规则:
+    1. 对于BIBD模式，r必须大于等于k
+    2. v*r必须能被k整除
+    3. r*(k-1)必须大于等于v-1
+    4. 对于BIBD模式，r*(k-1)必须能被(v-1)整除
+    """
     if bibd_only: min_r = max(min_r, k)
     for r in range(min_r, max_r):
       if v * r % k == 0 and r * (k - 1) >= v - 1:
@@ -179,6 +226,15 @@ class DataPlacementModel(object):
     return instance
 
   def build_model(self):
+    """
+    构建优化模型
+    
+    核心约束:
+    1. 每个磁盘的存储目标数量限制
+    2. 每个数据组需要足够的节点
+    3. 对等节点恢复流量的上下界约束
+    4. 对于BIBD模式，要求完全平衡的恢复流量
+    """
     logger.info(f"{self.num_nodes=} {self.num_targets_per_disk=} {self.group_size=} {self.num_groups=} {self.qlinearize=} {self.relax_lb=} {self.relax_ub=}")
     # v >= k
     assert self.num_nodes >= self.group_size, f"{self.num_nodes=} < {self.group_size=}"
@@ -201,45 +257,50 @@ class DataPlacementModel(object):
       assert self.num_targets_used == self.num_targets_total, f"{self.num_targets_used=} > {self.num_targets_total=}"
 
     model = po.ConcreteModel()
-    # index sets
-    model.disks = po.RangeSet(1, self.num_nodes)
-    model.target_idxs = po.RangeSet(1, self.num_targets_per_disk)
-    model.targets = model.disks * model.target_idxs
-    model.groups = po.RangeSet(1, self.num_groups)
+    # 索引集合
+    model.disks = po.RangeSet(1, self.num_nodes)  # 存储节点集合
+    model.target_idxs = po.RangeSet(1, self.num_targets_per_disk)  # 每个磁盘上的存储目标索引
+    model.targets = model.disks * model.target_idxs  # 所有存储目标
+    model.groups = po.RangeSet(1, self.num_groups)  # 数据组集合
 
     def disk_pairs_init(model):
+      """初始化磁盘对集合，用于计算恢复流量"""
       for disk in model.disks:
         for peer in model.disks:
           if peer > disk:
             yield (disk, peer)
     model.disk_pairs = po.Set(dimen=2, initialize=disk_pairs_init)
 
-    # variables
-
-    model.disk_used_by_group = po.Var(model.disks, model.groups, domain=po.Binary)
+    # 决策变量
+    model.disk_used_by_group = po.Var(model.disks, model.groups, domain=po.Binary)  # 磁盘是否被数据组使用
     if self.qlinearize:
-      model.disk_in_same_group = po.Var(model.disk_pairs, model.groups, domain=po.Binary)
+      model.disk_in_same_group = po.Var(model.disk_pairs, model.groups, domain=po.Binary)  # 两个磁盘是否在同一数据组
 
-    # constraints
-
+    # 约束条件
     def calc_disk_in_same_group(model, disk, peer, group):
+      """计算两个磁盘是否在同一数据组"""
       return model.disk_used_by_group[disk,group] * model.disk_used_by_group[peer,group]
 
     def define_disk_in_same_group_lower_bound(model, disk, peer, group):
+      """定义磁盘在同一数据组的下界约束"""
       return model.disk_used_by_group[disk,group] + model.disk_used_by_group[peer,group] <= model.disk_in_same_group[disk,peer,group] + 1
 
     def define_disk_in_same_group_upper_bound1(model, disk, peer, group):
+      """定义磁盘在同一数据组的上界约束1"""
       return model.disk_in_same_group[disk,peer,group] <= model.disk_used_by_group[disk,group]
 
     def define_disk_in_same_group_upper_bound2(model, disk, peer, group):
+      """定义磁盘在同一数据组的上界约束2"""
       return model.disk_in_same_group[disk,peer,group] <= model.disk_used_by_group[peer,group]
 
     if self.qlinearize:
+      """添加线性化约束"""
       model.define_disk_in_same_group_lower_bound_eqn = po.Constraint(model.disk_pairs, model.groups, rule=define_disk_in_same_group_lower_bound)
       model.define_disk_in_same_group_upper_bound1_eqn = po.Constraint(model.disk_pairs, model.groups, rule=define_disk_in_same_group_upper_bound1)
       model.define_disk_in_same_group_upper_bound2_eqn = po.Constraint(model.disk_pairs, model.groups, rule=define_disk_in_same_group_upper_bound2)
 
     def each_disk_has_limited_capcity(model, disk):
+      """每个磁盘的存储目标数量限制"""
       if self.all_targets_used:
         return po.quicksum(model.disk_used_by_group[disk,group] for group in model.groups) == self.num_targets_per_disk
       else:
@@ -247,16 +308,19 @@ class DataPlacementModel(object):
     model.each_disk_has_limited_capcity_eqn = po.Constraint(model.disks, rule=each_disk_has_limited_capcity)
 
     def enough_disks_assigned_to_each_group(model, group):
+      """每个数据组需要足够的节点"""
       return po.quicksum(model.disk_used_by_group[disk,group] for disk in model.disks) == self.group_size
     model.enough_disks_assigned_to_each_group_eqn = po.Constraint(model.groups, rule=enough_disks_assigned_to_each_group)
 
     def calc_peer_recovery_traffic(model, disk, peer):
+      """计算对等节点间的恢复流量"""
       if self.qlinearize:
         return po.quicksum(model.disk_in_same_group[disk,peer,group] for group in model.groups)
       else:
         return po.quicksum(calc_disk_in_same_group(model, disk, peer, group) for group in model.groups)
 
     def peer_recovery_traffic_upper_bound(model, disk, peer):
+      """对等节点恢复流量的上界约束"""
       if self.balanced_incomplete_block_design:
         return calc_peer_recovery_traffic(model, disk, peer) == self.max_recovery_traffic_on_peer
       else:
@@ -264,6 +328,7 @@ class DataPlacementModel(object):
     model.peer_recovery_traffic_upper_bound_eqn = po.Constraint(model.disk_pairs, rule=peer_recovery_traffic_upper_bound)
 
     def peer_recovery_traffic_lower_bound(model, disk, peer):
+      """对等节点恢复流量的下界约束"""
       return calc_peer_recovery_traffic(model, disk, peer) >= max(0, self.max_recovery_traffic_on_peer - self.relax_lb)
 
     if self.balanced_incomplete_block_design:
@@ -275,10 +340,11 @@ class DataPlacementModel(object):
       logger.info(f"lower bound not imposed on peer traffic: {self.relax_lb=} {self.qlinearize=} {self.all_targets_used=}")
 
     def total_recovery_traffic(model):
+      """计算总恢复流量"""
       return po.summation(model.disk_in_same_group) * 2
 
     # model.obj = po.Objective(rule=total_recovery_traffic, sense=po.minimize)
-    model.obj = po.Objective(expr=1)  # dummy objective
+    model.obj = po.Objective(expr=1)  # 虚拟目标函数
     return model
 
   def solve_model(self, instance, pyomo_solver, threads, timelimit, output_path):
@@ -312,18 +378,39 @@ class DataPlacementModel(object):
     return incidence_matrix
 
   def check_solution(self, instance):
+    """
+    检查优化求解结果是否满足约束条件
+    
+    主要检查以下几点:
+    1. 对等节点恢复流量是否在上下界范围内
+    2. 总恢复流量是否不超过理论最大值
+    3. 对于BIBD模式,恢复流量是否完全平衡
+    
+    参数:
+      instance: 优化模型实例
+      
+    返回:
+      total_traffic: 总恢复流量
+      min_peer_traffic: 最小对等节点恢复流量 
+      max_peer_traffic: 最大对等节点恢复流量
+    """
+    # 检查是否有对等节点恢复流量下界约束
     has_peer_traffic_lower_bound = False
     for c in instance.component_objects(po.Constraint):
       if "peer_recovery_traffic_lower_bound_eqn" in str(c):
         has_peer_traffic_lower_bound = True
 
+    # 检查每对节点之间的恢复流量是否满足约束
     peer_traffic_map = self.get_peer_traffic(instance)
     for (disk, peer), peer_traffic in peer_traffic_map.items():
       logger.debug(f"{disk},{peer}: {peer_traffic:.1f}")
+      # 检查上界约束
       assert peer_traffic <= self.max_recovery_traffic_on_peer + self.relax_ub + 1e-5, f"{peer_traffic=} > {self.max_recovery_traffic_on_peer=} + {self.relax_ub}"
+      # 如果有下界约束,检查下界约束
       if has_peer_traffic_lower_bound:
         assert peer_traffic >= max(0, self.max_recovery_traffic_on_peer - self.relax_lb) - 1e-5, f"{peer_traffic=} < {self.max_recovery_traffic_on_peer=} - {self.relax_lb}"
 
+    # 计算关键指标
     min_peer_traffic = min(peer_traffic_map.values())
     max_peer_traffic = max(peer_traffic_map.values())
     total_traffic = sum(peer_traffic_map.values())
@@ -331,12 +418,15 @@ class DataPlacementModel(object):
     logger.info(f"{min_peer_traffic=:.1f} {max_peer_traffic=:.1f}")
     logger.info(f"{total_traffic=} {max_total_traffic=}")
 
+    # 检查恢复流量差异
     peer_traffic_diff = max_peer_traffic - min_peer_traffic
     if has_peer_traffic_lower_bound:
       assert peer_traffic_diff <= self.relax_ub + self.relax_lb + 1e-5, f"{peer_traffic_diff=}"
+    # 对于BIBD模式,要求完全平衡
     if self.balanced_incomplete_block_design:
       assert math.isclose(peer_traffic_diff, 0.0, abs_tol=1e-9), f"{peer_traffic_diff=}"
 
+    # 检查总流量约束
     assert total_traffic <= max_total_traffic + 1e-5
     return total_traffic, min_peer_traffic, max_peer_traffic
 
