@@ -61,9 +61,10 @@ Result<Void> FuseApplication::Impl::initApplication() {
   auto firstInitRes = launcher_->init();
   XLOGF_IF(FATAL, !firstInitRes, "Failed to init launcher: {}", firstInitRes.error());
 
-  /*Lambda 表达式：
-     [this] 是捕获列表，表示这个 Lambda 表达式可以访问当前对象的成员变量和成员函数。
-  
+  /*
+    [this] 是捕获列表，表示这个 Lambda 表达式可以访问当前对象的成员变量和成员函数。
+    Lambda 表达式：
+    appInfo是第二个参数
   */
   app_detail::loadAppInfo([this] { return launcher_->loadAppInfo(); }, appInfo);
   app_detail::initConfig(hf3fsConfig, configFlags_, appInfo, [this] { return launcher_->loadConfigTemplate(); });
