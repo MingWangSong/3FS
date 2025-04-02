@@ -176,10 +176,39 @@ struct DirEntryInodeVector {
         inodes(std::move(inodes)) {}
 };
 
+/**
+ * FuseClients 结构体是FUSE文件系统客户端的核心实现
+ * 
+ * 功能职责：
+ * 1. 管理与一个挂载点相关的所有FUSE操作
+ * 2. 维护与各种服务的连接（元数据服务、存储服务、管理服务）
+ * 3. 处理文件系统操作（读、写、创建、删除等）
+ * 4. 管理inode缓存和IO任务队列
+ */
 struct FuseClients {
   FuseClients() = default;
   ~FuseClients();
 
+  /**
+   * 初始化FUSE客户端
+   * 
+   * @param appInfo 应用程序信息，包含集群ID、主机名等
+   * @param mountPoint 文件系统挂载点路径
+   * @param tokenFile 认证令牌文件路径
+   * @param fuseConfig FUSE配置
+   * 
+   * 初始化流程：
+   * 1. 保存配置和挂载点信息
+   * 2. 加载认证令牌
+   * 3. 初始化网络客户端(Client)
+   * 4. 初始化管理服务客户端(MgmtdClient)
+   * 5. 初始化存储服务客户端(StorageClient)
+   * 6. 初始化元数据服务客户端(MetaClient)
+   * 7. 初始化IO任务队列和处理协程
+   * 8. 启动定期同步任务
+   * 
+   * 每个FuseClients实例与一个具体的挂载点关联，负责处理该挂载点的所有文件系统操作
+   */
   Result<Void> init(const flat::AppInfo &appInfo,
                     const String &mountPoint,
                     const String &tokenFile,
@@ -192,35 +221,37 @@ struct FuseClients {
   CoTask<void> periodicSyncScan();
   CoTask<void> periodicSync(InodeId inodeId);
 
-  std::unique_ptr<net::Client> client;
-  std::shared_ptr<client::MgmtdClientForClient> mgmtdClient;
-  std::shared_ptr<storage::client::StorageClient> storageClient;
-  std::shared_ptr<meta::client::MetaClient> metaClient;
+  std::unique_ptr<net::Client> client;                               // 网络客户端
+  std::shared_ptr<client::MgmtdClientForClient> mgmtdClient;         // 管理服务客户端
+  std::shared_ptr<storage::client::StorageClient> storageClient;     // 存储服务客户端
+  std::shared_ptr<meta::client::MetaClient> metaClient;              // 元数据服务客户端
 
-  std::string fuseToken;
-  std::string fuseMount;
-  Path fuseMountpoint;
-  std::optional<Path> fuseRemountPref;
-  std::atomic<bool> memsetBeforeRead = false;
-  int maxIdleThreads = 0;
-  int maxThreads = 0;
-  bool enableWritebackCache = false;
+  std::string fuseToken;                                             // FUSE认证令牌
+  std::string fuseMount;                                             // FUSE挂载名称
+  Path fuseMountpoint;                                               // FUSE挂载点路径
+  std::optional<Path> fuseRemountPref;                               // FUSE重挂载前缀
+  std::atomic<bool> memsetBeforeRead = false;                        // 读取前是否需要清零内存
+  int maxIdleThreads = 0;                                            // 最大空闲线程数
+  int maxThreads = 0;                                                // 最大线程数
+  bool enableWritebackCache = false;                                 // 是否启用回写缓存
 
-  std::unique_ptr<ConfigCallbackGuard> onFuseConfigUpdated;
+  std::unique_ptr<ConfigCallbackGuard> onFuseConfigUpdated;          // 配置更新回调
 
+  // inode缓存，维护文件系统中活跃的inode，根目录的inode总是存在
   std::unordered_map<InodeId, std::shared_ptr<RcInode>> inodes = {
       {InodeId::root(), std::make_shared<RcInode>(Inode{}, 2)}};
-  std::mutex inodesMutex;
+  std::mutex inodesMutex;                                            // inode缓存互斥锁
 
+  // readdir-plus操作的结果缓存
   std::unordered_map<uint64_t, DirEntryInodeVector> readdirplusResults;
-  std::mutex readdirplusResultsMutex;
+  std::mutex readdirplusResultsMutex;                                // readdir-plus结果缓存互斥锁
 
-  std::atomic_uint64_t dirHandle{0};
+  std::atomic_uint64_t dirHandle{0};                                 // 目录句柄计数器
 
-  std::shared_ptr<net::RDMABufPool> bufPool;
-  int maxBufsize = 0;
+  std::shared_ptr<net::RDMABufPool> bufPool;                         // RDMA缓冲区池
+  int maxBufsize = 0;                                                // 最大缓冲区大小
 
-  fuse_session *se = nullptr;
+  fuse_session *se = nullptr;                                        // FUSE会话
 
   std::atomic<std::chrono::nanoseconds> jitter;
 

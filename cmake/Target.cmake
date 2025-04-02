@@ -37,18 +37,24 @@ macro(target_add_shared_lib NAME)
     target_enable_ipo(${NAME})
 endmacro()
 
+# 定义一个宏，用于添加可执行目标
 macro(target_add_bin NAME MAIN_FILE)
-  add_executable(${NAME} ${MAIN_FILE})
+    # 添加可执行文件
+    add_executable(${NAME} ${MAIN_FILE})
+    # 连接库
     target_link_libraries(${NAME} ${ARGN} "")
+    # 设置头文件目录
     target_include_directories(${NAME}
         PUBLIC
-            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
-            ${PROJECT_SOURCE_DIR}
-            ${PROJECT_SOURCE_DIR}/src/lib/api
-            ${PROJECT_BINARY_DIR}/src
-            ${PROJECT_BINARY_DIR}
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src> # 在构建时使用的源目录
+            ${PROJECT_SOURCE_DIR} # 项目源目录
+            ${PROJECT_SOURCE_DIR}/src/lib/api # 项目源目录下的特定库目录
+            ${PROJECT_BINARY_DIR}/src # 项目二进制目录下的源目录
+            ${PROJECT_BINARY_DIR} # 项目二进制目录
     )
+    # 设置运行时输出目录
     set_target_properties(${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    # 启用交叉过程优化
     target_enable_ipo(${NAME})
 endmacro()
 

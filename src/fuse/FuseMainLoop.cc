@@ -6,6 +6,29 @@
 #include "FuseOps.h"
 
 namespace hf3fs::fuse {
+/**
+ * FUSE主循环函数，负责设置和启动FUSE会话
+ * 
+ * @param programName 程序名称
+ * @param allowOther 是否允许其他用户访问挂载点
+ * @param mountpoint 挂载点路径
+ * @param maxbufsize 最大缓冲区大小
+ * @param clusterId 集群ID
+ * 
+ * 功能说明：
+ * 1. 获取全局单例FuseClients实例和FuseOps操作集合
+ * 2. 构建FUSE命令行参数和选项
+ * 3. 创建FUSE会话并将其关联到FuseClients实例
+ * 4. 设置信号处理器并挂载文件系统
+ * 5. 根据配置启动单线程或多线程事件循环
+ * 
+ * 与FuseClients的关系：
+ * - FuseClients提供具体的文件系统操作实现
+ * - fuseMainLoop将FuseClients与FUSE框架连接起来
+ * - 通过将FuseClients中的se字段设置为fuse_session，建立两者的联系
+ * - 当FUSE收到文件系统请求时，会通过ops回调到FuseOps中定义的函数
+ * - 而FuseOps又会调用FuseClients中的方法来处理具体请求
+ */
 int fuseMainLoop(const String &programName,
                  bool allowOther,
                  const String &mountpoint,
@@ -75,6 +98,7 @@ int fuseMainLoop(const String &programName,
     return 1;
   }
 
+  // 创建FUSE会话并与FuseClients实例关联
   d.se = fuse_session_new(&args, &ops, sizeof(ops), NULL);
   if (d.se == nullptr) {
     return 1;
@@ -94,8 +118,10 @@ int fuseMainLoop(const String &programName,
 
   int ret = -1;
   if (opts.singlethread) {
+    // 单线程模式
     ret = fuse_session_loop(d.se);
   } else {
+    // 多线程模式，根据FuseClients配置设置线程参数
     fuse_loop_cfg_set_clone_fd(config, opts.clone_fd);
     fuse_loop_cfg_set_idle_threads(config, d.maxIdleThreads);
     fuse_loop_cfg_set_max_threads(config, d.maxThreads);
