@@ -58,6 +58,22 @@ void record(std::string_view op, uid_t uid) {
   fuseOp.addSample(1, {{"instance", std::string(op)}, {"uid", folly::to<std::string>(uid)}});
 }
 
+/**
+ * 获取FuseClients全局单例实例
+ * 
+ * 设计说明：
+ * 1. FuseClients作为静态全局变量d在程序启动时被创建
+ * 2. 通过getFuseClientsInstance函数返回对该实例的引用
+ * 3. 使用单例模式确保整个程序中只有一个FuseClients实例
+ * 
+ * 单例模式的必要性：
+ * - FUSE框架需要通过固定的回调函数访问文件系统实现
+ * - 这些回调函数必须是C风格的函数，不能是类成员函数
+ * - 通过全局单例，这些C风格回调可以访问FuseClients实例
+ * - 保证每个挂载点对应一个进程，每个进程有一个FuseClients实例
+ * 
+ * @return FuseClients的全局单例引用
+ */
 FuseClients &getFuseClientsInstance() { return d; }
 
 namespace {
