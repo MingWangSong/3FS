@@ -47,53 +47,82 @@ Result<Void> establishClientSession(client::IMgmtdClientForClient &mgmtdClient) 
 
 FuseClients::~FuseClients() { stop(); }
 
+/**
+ * 初始化FUSE客户端系统，建立与存储和元数据服务的连接
+ * @param appInfo 应用信息，包含集群ID和其他元数据
+ * @param mountPoint FUSE挂载点路径
+ * @param tokenFile 认证令牌文件路径
+ * @param fuseConfig FUSE配置对象
+ * @return 成功返回Void对象，失败返回错误
+ */
 Result<Void> FuseClients::init(const flat::AppInfo &appInfo,
                                const String &mountPoint,
                                const String &tokenFile,
                                FuseConfig &fuseConfig) {
+  // 保存配置引用，便于后续访问
   config = &fuseConfig;
 
+  // 设置FUSE挂载名称（使用集群ID作为挂载名）
+  // FUSE协议限制挂载名必须小于32字符
   fuseMount = appInfo.clusterId;
   XLOGF_IF(FATAL,
            fuseMount.size() >= 32,
            "FUSE only support mount name shorter than 32 characters, but {} got.",
            fuseMount);
 
+  // 规范化挂载点路径，确保路径一致性
   fuseMountpoint = Path(mountPoint).lexically_normal();
 
+  // 处理重挂载前缀设置（如果配置中指定了）
+  // 重挂载前缀用于在重挂载时保持原有挂载点信息
   if (fuseConfig.remount_prefix()) {
     fuseRemountPref = Path(*fuseConfig.remount_prefix()).lexically_normal();
   }
 
+  // 获取FUSE认证令牌，优先使用环境变量，其次从配置文件读取
   if (const char *env_p = std::getenv("HF3FS_FUSE_TOKEN")) {
     XLOGF(INFO, "Use token from env var");
     fuseToken = std::string(env_p);
   } else {
     XLOGF(INFO, "Use token from config");
+    // 从文件加载令牌并去除两端空白
     auto tokenRes = loadFile(tokenFile);
-    RETURN_ON_ERROR(tokenRes);
+    RETURN_ON_ERROR(tokenRes); // 文件读取失败则返回错误
     fuseToken = folly::trimWhitespace(*tokenRes);
   }
-  enableWritebackCache = fuseConfig.enable_writeback_cache();
-  memsetBeforeRead = fuseConfig.memset_before_read();
-  maxIdleThreads = fuseConfig.max_idle_threads();
+
+  // 配置FUSE缓存和IO行为
+  enableWritebackCache = fuseConfig.enable_writeback_cache(); // 启用写回缓存
+  memsetBeforeRead = fuseConfig.memset_before_read(); // 读取前是否清零内存
+  maxIdleThreads = fuseConfig.max_idle_threads(); // 最大空闲线程数
+
+  // 根据系统CPU核心数动态计算最大线程数
+  // 通常设置为逻辑核心数的一半（向上取整）
   int logicalCores = std::thread::hardware_concurrency();
   if (logicalCores != 0) {
     maxThreads = std::min(fuseConfig.max_threads(), (logicalCores + 1) / 2);
   } else {
     maxThreads = fuseConfig.max_threads();
   }
+
+  // 创建RDMA缓冲池用于高性能网络IO
   bufPool = net::RDMABufPool::create(fuseConfig.io_bufs().max_buf_size(), fuseConfig.rdma_buf_pool_size());
 
+  // 初始化IO向量和IO环系统
+  // iovs用于管理IO缓冲区，iors用于管理IO请求环
   iovs.init(fuseRemountPref.value_or(fuseMountpoint), fuseConfig.iov_limit());
   iors.init(fuseConfig.iov_limit());
   userConfig.init(fuseConfig);
 
+  // 创建网络客户端（如果不存在）
   if (!client) {
     client = std::make_unique<net::Client>(fuseConfig.client());
-    RETURN_ON_ERROR(client->start());
+    RETURN_ON_ERROR(client->start()); // 启动客户端，失败则返回错误
   }
+  // 创建网络客户端通信上下文生成器，用于RPC通信
   auto ctxCreator = [this](net::Address addr) { return client->serdeCtx(addr); };
+
+  // 创建管理服务客户端（用于集群管理通信）
   if (!mgmtdClient) {
     mgmtdClient = std::make_shared<client::MgmtdClientForClient>(
         appInfo.clusterId,
@@ -101,76 +130,100 @@ Result<Void> FuseClients::init(const flat::AppInfo &appInfo,
         fuseConfig.mgmtd());
   }
 
+  // 获取物理主机名（真实物理机名称）和容器主机名
+  // 用于客户端身份识别和会话建立
   auto physicalHostnameRes = SysResource::hostname(/*physicalMachineName=*/true);
   RETURN_ON_ERROR(physicalHostnameRes);
 
   auto containerHostnameRes = SysResource::hostname(/*physicalMachineName=*/false);
   RETURN_ON_ERROR(containerHostnameRes);
 
+  // 基于物理主机名生成随机客户端ID
   auto clientId = ClientId::random(*physicalHostnameRes);
 
+  // 设置客户端会话有效载荷，包含客户端标识和会话数据
   mgmtdClient->setClientSessionPayload({clientId.uuid.toHexString(),
-                                        flat::NodeType::FUSE,
+                                        flat::NodeType::FUSE, // 节点类型为FUSE
                                         flat::ClientSessionData::create(
                                             /*universalId=*/*physicalHostnameRes,
                                             /*description=*/fmt::format("fuse: {}", *containerHostnameRes),
                                             appInfo.serviceGroups,
                                             appInfo.releaseVersion),
-                                        // TODO: use real user info
+                                        // TODO: 使用真实用户信息
                                         flat::UserInfo{}});
 
+  // 设置配置监听器，用于动态更新配置
   mgmtdClient->setConfigListener(ApplicationBase::updateConfig);
 
+  // 启动管理服务客户端并等待完成
   folly::coro::blockingWait(mgmtdClient->start(&client->tpg().bgThreadPool().randomPick()));
+  
+  // 刷新路由信息（非强制）
   folly::coro::blockingWait(mgmtdClient->refreshRoutingInfo(/*force=*/false));
+  
+  // 建立客户端会话（带重试机制）
   RETURN_ON_ERROR(establishClientSession(*mgmtdClient));
 
+  // 创建存储客户端，用于与存储服务通信
   storageClient = storage::client::StorageClient::create(clientId, fuseConfig.storage(), *mgmtdClient);
 
+  // 创建元数据客户端，用于处理文件系统元数据操作
   metaClient =
       std::make_shared<meta::client::MetaClient>(clientId,
                                                  fuseConfig.meta(),
                                                  std::make_unique<meta::client::MetaClient::StubFactory>(ctxCreator),
                                                  mgmtdClient,
                                                  storageClient,
-                                                 true /* dynStripe */);
+                                                 true /* dynStripe */); // 启用动态条带化
+  
+  // 启动元数据客户端
   metaClient->start(client->tpg().bgThreadPool());
 
+  // 初始化IO作业队列系统，使用三个优先级队列（高、中、低）
   iojqs.reserve(3);
-  iojqs.emplace_back(new BoundedQueue<IoRingJob>(fuseConfig.io_jobq_sizes().hi()));
-  iojqs.emplace_back(new BoundedQueue<IoRingJob>(fuseConfig.io_jobq_size()));
-  iojqs.emplace_back(new BoundedQueue<IoRingJob>(fuseConfig.io_jobq_sizes().lo()));
+  iojqs.emplace_back(new BoundedQueue<IoRingJob>(fuseConfig.io_jobq_sizes().hi())); // 高优先级队列
+  iojqs.emplace_back(new BoundedQueue<IoRingJob>(fuseConfig.io_jobq_size())); // 中优先级队列
+  iojqs.emplace_back(new BoundedQueue<IoRingJob>(fuseConfig.io_jobq_sizes().lo())); // 低优先级队列
 
+  // 设置提交等待抖动，用于避免请求拥塞
   jitter = fuseConfig.submit_wait_jitter();
 
+  // 创建并启动IO环工作协程，处理IO请求
   auto &tp = client->tpg().bgThreadPool();
   auto coros = fuseConfig.batch_io_coros();
   for (int i = 0; i < coros; ++i) {
-    auto exec = &tp.get(i % tp.size());
+    auto exec = &tp.get(i % tp.size()); // 轮询选择执行器
+    // 创建协程并绑定取消令牌，以支持优雅关闭
     co_withCancellation(cancelIos.getToken(), ioRingWorker(i, coros)).scheduleOn(exec).start();
   }
 
+  // 创建IO监视线程（每个优先级一个）
   ioWatches.reserve(3);
   for (int i = 0; i < 3; ++i) {
     ioWatches.emplace_back(folly::partial(&FuseClients::watch, this, i));
   }
 
+  // 创建定期同步工作池，用于周期性刷新脏inode
   periodicSyncWorker = std::make_unique<CoroutinesPool<InodeId>>(config->periodic_sync().worker());
   periodicSyncWorker->start(folly::partial(&FuseClients::periodicSync, this), tp);
 
+  // 创建定期同步后台运行器，用于定期扫描脏inode
+  // 添加随机因子(0.7-1.3)，避免所有客户端同时扫描
   periodicSyncRunner = std::make_unique<BackgroundRunner>(&tp.pickNextFree());
   periodicSyncRunner->start("PeriodSync", folly::partial(&FuseClients::periodicSyncScan, this), [&]() {
     return config->periodic_sync().interval() * folly::Random::randDouble(0.7, 1.3);
   });
 
+  // 注册配置更新回调，动态更新内存配置
   onFuseConfigUpdated = fuseConfig.addCallbackGuard([&fuseConfig = fuseConfig, this] {
     memsetBeforeRead = fuseConfig.memset_before_read();
     jitter = std::chrono::duration_cast<std::chrono::nanoseconds>(fuseConfig.submit_wait_jitter());
   });
 
+  // 创建通知失效线程池，用于处理缓存失效通知
   notifyInvalExec =
       std::make_unique<folly::IOThreadPoolExecutor>(fuseConfig.notify_inval_threads(),
-                                                    std::make_shared<folly::NamedThreadFactory>("NotifyInvalThread"));
+                                                   std::make_shared<folly::NamedThreadFactory>("NotifyInvalThread"));
 
   return Void{};
 }
