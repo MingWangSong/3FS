@@ -45,7 +45,7 @@ struct IovAttrs {
  * 键格式: UUID.配置1.配置2...
  * 支持的配置:
  *   b* - 块大小(字节)
- *   r*/w* - IO环读/写模式及深度
+ *   r*w* - IO环读/写模式及深度
  *   t* - 超时设置(毫秒)
  *   f* - 标志位(二进制)
  *   p[l/h/n] - 优先级(低/高/正常)
@@ -164,7 +164,7 @@ std::optional<int> IovTable::iovDesc(meta::InodeId iid) {
 
 /**
  * 添加新的IO向量缓冲区
- * @param key 键字符串
+ * @param key 键字符串 包含配置信息
  * @param shmPath 共享内存文件路径
  * @param pid 进程ID
  * @param ui 用户信息
