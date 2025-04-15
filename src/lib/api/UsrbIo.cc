@@ -33,6 +33,10 @@ static Hf3fsLibAliveness alive;
 bool hf3fs_is_hf3fs(int fd) {
   uint32_t magic = 0;
 
+  // 使用ioctl系统调用来获取文件系统的魔数(magic number)
+  // fd: 文件描述符
+  // HF3FS_IOC_GET_MAGIC_NUM: ioctl命令,用于获取HF3FS文件系统的魔数
+  // &magic: 输出参数,用于存储获取到的魔数值
   auto res = ioctl(fd, hf3fs::lib::fuse::HF3FS_IOC_GET_MAGIC_NUM, &magic);
   if (res) {
     return false;
@@ -556,6 +560,7 @@ static Hf3fsRegisteredFds regfds(noFiles());
 int hf3fs_reg_fd(int fd, uint64_t flags) {
   (void)flags;
 
+  // fd合法性检测
   auto is3fs = hf3fs_is_hf3fs(fd);
   if (!is3fs || fd >= (int)regfds.size()) {
     return EBADF;
@@ -563,12 +568,14 @@ int hf3fs_reg_fd(int fd, uint64_t flags) {
     return EINVAL;
   }
 
+  // 获取inode号
   struct statx stx;
   auto sres = statx(fd, "", AT_EMPTY_PATH | AT_STATX_DONT_SYNC, STATX_INO, &stx);
   if (sres < 0) {
     return errno;
   }
 
+  // 复制fd，保证3fs对独立管理文件访问，避免fd被意外close
   auto dupfd = dup(fd);
   if (dupfd < 0) {
     return errno;

@@ -48,6 +48,7 @@ int fuseMainLoop(const String &programName,
   std::vector<std::string> fuseArgs;
   fuseArgs.push_back(programName);
   if (allowOther) {
+    // -o 是 FUSE 的选项标志,用于指定后续的挂载选项
     fuseArgs.push_back("-o");
     fuseArgs.push_back("allow_other");
     fuseArgs.push_back("-o");
@@ -62,6 +63,7 @@ int fuseMainLoop(const String &programName,
   fuseArgs.push_back("subtype=hf3fs");
   fuseArgs.push_back("-o");
   fuseArgs.push_back("fsname=hf3fs." + clusterId);
+  // fuse只接收c风格的字符数组vector
   std::vector<char *> fuseArgsPtr;
   for (auto &arg : fuseArgs) {
     fuseArgsPtr.push_back(const_cast<char *>(arg.c_str()));
@@ -122,6 +124,10 @@ int fuseMainLoop(const String &programName,
     ret = fuse_session_loop(d.se);
   } else {
     // 多线程模式，根据FuseClients配置设置线程参数
+    /**clone_fd: 设置是否为每个线程克隆文件描述符
+      idle_threads: 设置空闲线程数量上限
+      max_threads: 设置最大工作线程数
+      fuse_session_loop_mt: 启动多线程事件循环,让多个线程并发处理文件系统请求 */
     fuse_loop_cfg_set_clone_fd(config, opts.clone_fd);
     fuse_loop_cfg_set_idle_threads(config, d.maxIdleThreads);
     fuse_loop_cfg_set_max_threads(config, d.maxThreads);

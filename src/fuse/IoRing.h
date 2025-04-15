@@ -313,8 +313,7 @@ namespace hf3fs::fuse {
 
       auto idx = *idxRes;
 
-      auto ior = std::make_shared<
-          IoRing>(std::move(shm), name, ui, forRead, buf, size, ioDepth, attrs.priority, attrs.timeout, attrs.flags);
+      auto ior = std::make_shared<IoRing>(std::move(shm), name, ui, forRead, buf, size, ioDepth, attrs.priority, attrs.timeout, attrs.flags);
       ior->mountName = mountName.native();
       ioRings->table[idx].store(ior);
 
