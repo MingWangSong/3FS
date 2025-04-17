@@ -167,10 +167,12 @@ static Result<std::map<IBDevPort, NetDev>> ibdev2netdev() {
   }
 
   XLOGF(INFO, "ibdev2netdev: {}", output);
+  // {mlx5_0, 1} --->  ibs5
   std::map<IBDevPort, NetDev> map;
   std::vector<String> lines;
   folly::split('\n', output, lines, true);
   for (const auto &line : lines) {
+    // mlx5_0 port 1 ==> ibs5 (Down)
     std::vector<String> fields;
     folly::split(" ", line, fields, true);
     auto devName = fields[0];
@@ -276,6 +278,7 @@ Result<std::vector<IBDevice::Ptr>> IBDevice::openAll(const IBConfig &config) {
     
     // 添加设备到设备列表
     XLOGF(INFO, "IBDevice add {}, id {}, {} available ports", devName, devId, device.value()->ports().size());
+    // emplace_back直接在容器末尾构造新元素
     devices.emplace_back(std::move(*device));
   }
 
@@ -333,8 +336,7 @@ Result<IBDevice::Ptr> IBDevice::open(ibv_device *dev,
     return makeError(RPCCode::kIBInitFailed);
   }
 
-  // 创建设备过滤函数
-  // 根据配置的device_filter确定是否使用特定设备
+  // 创建设备过滤函数 （filter为空或者设备名在filter列表中）
   auto filter = [&filter = config.device_filter()](std::string name) {
     return filter.empty() || std::find(filter.begin(), filter.end(), name) != filter.end();
   };
@@ -647,6 +649,12 @@ class IBDevice::BackgroundRunner : public EventLoop::EventHandler,
       : timer_(fd) {}
 
   int fd() const override { return timer_; }
+  /*
+  这段代码实现了两个主要事件的处理:
+  定时器事件处理：循环读取并清空 timerfd 的数据
+  IB设备端口状态更新：定期遍历所有 IB 设备的所有端口，调用 updatePort 更新端口状态信息
+  这是一个后台定时任务，用于维护 IB 设备端口的状态。
+  */
   void handleEvents(uint32_t /* events */) override {
     std::array<char, 64> buf;
     while (true) {
@@ -682,23 +690,30 @@ class IBDevice::AsyncEventHandler : public EventLoop::EventHandler {
 void IBDevice::checkAsyncEvent() const {
   XLOGF(DBG, "IBDevice {} check async event.", name());
 
+  // 获取异步事件
   ibv_async_event event;
   auto ret = ibv_get_async_event(context(), &event);
   if (ret != 0) {
     return;
   }
+  // 确保事件被确认
   SCOPE_EXIT { ibv_ack_async_event(&event); };
 
+  // 获取事件名称用于日志和监控
   auto eventName = magic_enum::enum_name(event.event_type);
   auto instance = std::string(eventName);
+  
   switch (event.event_type) {
     case IBV_EVENT_DEVICE_FATAL:
+      // 设备致命错误,只记录日志和监控指标,不做实际处理
       events.addSample(1, {{"instance", instance}, {"tag", fmt::format("{}", name())}});
       XLOGF(CRITICAL, "IBDevice {} get event {}", name(), eventName);
       break;
     case IBV_EVENT_PORT_ERR:
+      // 端口错误,记录日志和监控指标,调用updatePort更新端口状态
       events.addSample(1, {{"instance", instance}, {"tag", fmt::format("{}:{}", name(), event.element.port_num)}});
       XLOGF(CRITICAL, "IBDevice {}:{} get event {}", name(), event.element.port_num, eventName);
+      // 实际处理:更新端口状态
       updatePort(event.element.port_num);
       break;
     case IBV_EVENT_PORT_ACTIVE:
@@ -707,11 +722,14 @@ void IBDevice::checkAsyncEvent() const {
     case IBV_EVENT_SM_CHANGE:
     case IBV_EVENT_CLIENT_REREGISTER:
     case IBV_EVENT_GID_CHANGE:
+      // 端口状态变更事件,记录日志和监控指标,调用updatePort更新端口状态
       events.addSample(1, {{"instance", instance}, {"tag", fmt::format("{}:{}", name(), event.element.port_num)}});
       XLOGF(INFO, "IBDevice {}:{} get event {}", name(), event.element.port_num, eventName);
+      // 实际处理:更新端口状态
       updatePort(event.element.port_num);
       break;
     default:
+      // 其他事件只记录日志,不做处理
       XLOGF(DBG, "IBDevice {} get event {}", name(), eventName);
       break;
   }
@@ -790,7 +808,7 @@ Result<Void> IBManager::startImpl(IBConfig config) {
   // 保存设备列表
   devices_ = std::move(*devices);
   
-  // 创建事件循环
+  // 创建事件循环（epoll）
   // 事件循环用于处理异步事件，如设备状态变化、套接字事件等
   eventLoop_ = EventLoop::create();
   auto result = eventLoop_->start("IBManager");

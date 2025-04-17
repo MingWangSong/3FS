@@ -31,6 +31,7 @@ class EventLoop : public hf3fs::enable_shared_from_this<EventLoop> {
    public:
     virtual ~EventHandler() = default;
     virtual int fd() const = 0;
+    // 定义事件处理的方法
     virtual void handleEvents(uint32_t epollEvents) = 0;
 
    protected:

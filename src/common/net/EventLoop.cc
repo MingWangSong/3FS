@@ -25,7 +25,7 @@ Result<Void> EventLoop::start(const std::string &threadName) {
     return makeError(RPCCode::kEpollInitError, "create eventfd failed");
   }
 
-  // 3. add event fd into epoll.
+  // 3. add event fd into epoll. 边缘触发模式
   struct epoll_event evt = {EPOLLIN | EPOLLET, {nullptr}};
   int ret = ::epoll_ctl(epfd_, EPOLL_CTL_ADD, eventfd_, &evt);
   if (UNLIKELY(ret == -1)) {
@@ -34,8 +34,11 @@ Result<Void> EventLoop::start(const std::string &threadName) {
     return makeError(RPCCode::kEpollAddError, std::move(msg));
   }
 
-  // 4. start loop in background thread.
+  // 4. start loop in background thread. 
+  // 创建一个新的std::jthread线程来运行EventLoop::loop函数
   thread_ = std::jthread(&EventLoop::loop, this);
+  // folly::setThreadName用于设置线程名称,方便调试和监控
+  // 通过thread_.get_id()获取线程ID,threadName作为线程名称
   folly::setThreadName(thread_.get_id(), threadName);
   return Void{};
 }
@@ -131,6 +134,8 @@ void EventLoop::loop() {
     // 2. handle events.
     for (int i = 0; i < n; ++i) {
       auto &evt = events[i];
+      // 当 evt.data.ptr 为空时，表示这是一个来自 eventfd 的唤醒事件
+      // eventfd 使用边缘触发(EPOLLET)模式,需要完全读取所有数据,否则事件会重复触发
       if (evt.data.ptr == nullptr) {
         // waked up by event fd. read all.
         uint64_t val;
@@ -139,8 +144,16 @@ void EventLoop::loop() {
         continue;
       }
 
+      // 将事件数据中的指针转换为HandlerWrapper对象指针
+      // evt.data.ptr存储了之前add()时设置的处理器包装对象
       auto wrapper = reinterpret_cast<HandlerWrapper *>(evt.data.ptr);
+
+      // 尝试获取处理器的强引用
+      // 由于handler存储为weak_ptr,需要先lock()转换为shared_ptr
+      // 如果原始处理器已被销毁,lock()会返回空指针
       if (auto handler = wrapper->handler.lock()) {
+        // 调用处理器的事件处理函数
+        // 将epoll返回的事件标志传入,让处理器知道发生了什么类型的事件
         handler->handleEvents(evt.events);
       }
     }

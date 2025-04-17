@@ -9,10 +9,12 @@
 
 namespace hf3fs::serde {
 
+// RPC框架中起到了服务注册表的作用
 class Services {
  public:
   Services() { addService(std::make_unique<echo::ServiceImpl>(), true); }
 
+  // 目前只支持RDMA服务
   template <class Service>
   Result<Void> addService(std::unique_ptr<Service> &&obj, bool isRDMA) {
     std::shared_ptr<Service> shared = std::move(obj);

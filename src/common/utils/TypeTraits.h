@@ -125,6 +125,7 @@ struct value_identity {
   constexpr static auto value = Value;
 };
 
+// 这种设计模式可以避免手动创建 shared_ptr 时可能出现的问题，提供了更安全的对象创建方式
 template <class T>
 struct enable_shared_from_this : public std::enable_shared_from_this<T> {
   template <class... Args>

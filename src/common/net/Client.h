@@ -30,6 +30,7 @@ class Client {
     CONFIG_HOT_UPDATED_ITEM(default_report_metrics, false);
   };
 
+  // 在 C++ 中，类的成员变量会在进入构造函数主体之前就完成默认构造，如serdeServices_
   explicit Client(const Config &config, const std::string &name = "Cli")
       : config_(config),
         tpg_(name, config_.thread_pool()),

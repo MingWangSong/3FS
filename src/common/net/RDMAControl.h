@@ -34,6 +34,7 @@ class RDMATransmissionLimiter {
 };
 using RDMATransmissionLimiterPtr = std::shared_ptr<RDMATransmissionLimiter>;
 
+// RDMA流量控制机制，防止RDMA传输过载
 class RDMAControlImpl : public serde::ServiceWrapper<RDMAControlImpl, RDMAControl> {
  public:
   class Config : public ConfigBase<Config> {

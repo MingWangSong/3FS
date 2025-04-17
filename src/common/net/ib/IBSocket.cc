@@ -1162,6 +1162,7 @@ bool IBSocket::drain() {
 }
 
 std::shared_ptr<IBSocketManager> IBSocketManager::create() {
+  // 获取定时器文件描述符
   auto fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
   if (fd < 0) {
     XLOGF(ERR, "Failed to create timer fd, errno {}", errno);
@@ -1207,6 +1208,12 @@ void IBSocketManager::close(IBSocket::Ptr socket) {
   }
 }
 
+/*
+IBSocketManager主要处理两类事件：
+定时器事件：通过timerfd接收定时触发的事件，需要循环读取以清空定时器
+超时清理事件：检查并清理已超时的RDMA socket连接（drainer），从事件循环和管理器中移除这些超时的连接
+这是一个连接清理管理器，用于安全地关闭和清理RDMA连接。
+*/
 void IBSocketManager::handleEvents(uint32_t /* events */) {
   std::array<char, 64> buf;
   while (true) {

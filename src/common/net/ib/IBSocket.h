@@ -554,6 +554,7 @@ class IBSocket : public Socket, folly::MoveOnly {
   std::atomic<bool> checkMsgSended_ = false;
 };
 
+// std::enable_shared_from_this 的作用是让类能够安全地获取指向自身的 shared_ptr
 class IBSocketManager : public EventLoop::EventHandler, public std::enable_shared_from_this<IBSocketManager> {
  public:
   static std::shared_ptr<IBSocketManager> create();

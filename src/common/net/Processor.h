@@ -42,6 +42,7 @@ class Processor {
     TransportPtr tr;
   };
 
+  // explicit 关键字在这里防止构造函数的隐式转换
   explicit Processor(serde::Services &serdeServices, CPUExecutorGroup &executor, const Config &config)
       : serdeServices_(serdeServices),
         executor_(executor),
@@ -60,6 +61,7 @@ class Processor {
 
   void setCoroutinesPoolGetter(auto &&g) { coroutinesPoolGetter_ = std::forward<decltype(g)>(g); }
 
+  // 空操作
   Result<Void> start(std::string_view = {}) { return Void{}; }
 
   void stopAndJoin() {
