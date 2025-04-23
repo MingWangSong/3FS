@@ -370,6 +370,16 @@ void hf3fs_destroy(void *userdata) { (void)userdata; }
 
 // /3fs-virt dir to contain all virtual dirs and files
 const std::string virtDir = "3fs-virt";
+
+/*定义了一个虚拟目录的 inode 节点 virtDirInode，具体包含:
+使用 InodeId::virt() 作为 inode ID
+目录类型，其父目录是根目录(InodeId::root())
+访问控制权限:
+所有者为 root (uid=0)
+组为 root (gid=0)
+权限为 0555 (所有用户只读和执行权限)
+这是用来创建 /3fs-virt 虚拟目录的基础结构。
+ */
 const auto virtDirInode =
     Inode{InodeId::virt(), InodeData{Directory{InodeId{InodeId::root()}}, Acl{Uid{0}, Gid{0}, Permission{0555}}}};
 // virtInodeTime,
@@ -457,9 +467,13 @@ CoTryTask<ssize_t> flushBuf(const flat::UserInfo &user,
   std::vector<ssize_t> res(1);
   auto uids = std::to_string(user.uid);
 
+  // 元数据事务流程
   auto begin = co_await pi->beginWrite(user, *d.metaClient, off, len);
   CO_RETURN_ON_ERROR(begin);
   auto truncateVer = *begin;
+  // 创建一个RAII风格的错误处理守卫对象
+  // 如果函数正常退出前没有调用dismiss()，则在作用域结束时会自动执行finishWrite
+  // 用于确保在发生错误时能正确清理写入状态
   auto onError = folly::makeGuard([&]() { pi->finishWrite(user, truncateVer, off, -1); });
 
   size_t done = 0;
@@ -477,6 +491,7 @@ CoTryTask<ssize_t> flushBuf(const flat::UserInfo &user,
     prepareLatency.addSample(now - start, monitor::TagSet{{"uid", uids}});
     start = now;
 
+    // 异步执行（协程）
     auto retExec = co_await ioExec.executeWrite(user, d.config->storage_io().write());
     now = SteadyClock::now();
     submitLatency.addSample(now - start, monitor::TagSet{{"uid", uids}});
@@ -667,7 +682,10 @@ void hf3fs_lookup(fuse_req_t req, fuse_ino_t fparent, const char *name) {
 
   struct fuse_entry_param e;
   init_entry(&e, d.userConfig.getConfig(userInfo).attr_timeout(), d.userConfig.getConfig(userInfo).entry_timeout());
-  if (parent == InodeId::root() && name == virtDir) {  // virtual dir /3fs-virt
+  
+  // virtual dir /3fs-virt
+  if (parent == InodeId::root() && name == virtDir) {  
+    // 用于将文件系统的内部 inode 属性（virtDirInode）转换并填充到 Linux 的 stat 结构体（e.attr）中
     fillLinuxStat(e.attr, virtDirInode);
     e.ino = linux_ino(virtDirInode.id);
     fuse_reply_entry(req, &e);
@@ -1566,30 +1584,37 @@ void hf3fs_read(fuse_req_t req, fuse_ino_t fino, size_t size, off_t off, struct 
 }
 
 void hf3fs_write(fuse_req_t req, fuse_ino_t fino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi) {
+  // 静态变量，获取挂载点名称，用于性能监控
   static auto mountName = d.fuseRemountPref.value_or(d.fuseMountpoint).native();
   static monitor::LatencyRecorder writeLatency("fuse.write.latency", monitor::TagSet{{"mount_name", mountName}});
   static monitor::DistributionRecorder writeDist("fuse.write.size", monitor::TagSet{{"mount_name", mountName}});
 
+  // 获取用户ID
   auto uid = fuse_req_ctx(req)->uid;
   auto uids = std::to_string(uid);
 
+  // 记录开始时间，用于计算操作延迟
   auto start = SteadyClock::now();
 
+  // 创建用户信息对象，包含uid、gid和令牌
   auto userInfo = UserInfo(flat::Uid(fuse_req_ctx(req)->uid), flat::Gid(fuse_req_ctx(req)->gid), d.fuseToken);
+  // 检查是否为基准测试模式，如果是则直接返回而不执行实际写入
   if (d.userConfig.getConfig(userInfo).dryrun_bench_mode()) {
     fuse_reply_write(req, size);
     return;
   }
 
+  // 检查是否为只读模式，如果是则返回错误
   if (d.userConfig.getConfig(userInfo).readonly()) {
     fuse_reply_err(req, EROFS);
     return;
   }
-
   writeDist.addSample(size, monitor::TagSet{{"uid", uids}});
 
+  // 从FUSE inode号获取真实的inode号
   auto ino = real_ino(fino);
 
+  // 记录写操作的详细信息
   XLOGF(OP_LOG_LEVEL,
         "hf3fs_write(ino={}, buf={}, size={}, off={}, pid={})",
         ino,
@@ -1599,16 +1624,20 @@ void hf3fs_write(fuse_req_t req, fuse_ino_t fino, const char *buf, size_t size, 
         fuse_req_ctx(req)->pid);
   record("write", fuse_req_ctx(req)->uid);
 
+  // 检查是否使用直接IO
   auto odir = ((FileHandle *)fi->fh)->oDirect;
   auto pi = inodeOf(*fi, ino);
-  //  auto &inode = pi->inode;
 
+  // 获取写缓冲区的互斥锁
   std::unique_lock lock(pi->wbMtx);
   auto wb = pi->writeBuf;
+  
+  // 如果使用直接IO或者写缓冲区大小为0，则不使用缓冲区
   if (odir || !d.config->io_bufs().write_buf_size()) {
     if (!wb) {
       lock.unlock();
     } else {
+      // 如果有未刷新的数据，先刷新缓冲区
       if (wb->len) {
         XLOGF(DBG, "to flush for o_direct fd  prev off {} len {}", off, wb->off, wb->len);
         if (flushBuf(req, pi, wb->off, *wb->memh, wb->len, true) < 0) {
@@ -1619,49 +1648,47 @@ void hf3fs_write(fuse_req_t req, fuse_ino_t fino, const char *buf, size_t size, 
         wb->len = 0;
       }
     }
-    /*
-        if (!d.buf) {
-          XLOGF(INFO, "  hf3fs_write register buffer");
-          d.buf.reset(std::make_unique<std::vector<uint8_t>>(d.maxBufsize));
-          auto ret = d.storageClient->registerIOBuffer(d.buf->data(), d.maxBufsize);
-          if (ret.hasError()) {
-            handle_error(req, ret);
-            return;
-          } else {
-            d.memh.reset(std::make_unique<IOBuffer>(std::move(*ret)));
-          }
-        }
-    */
+    
+    // 注册RDMA buff
     auto memh = IOBuffer(folly::coro::blocking_wait(d.bufPool->allocate()));
 
+    // 将数据复制到IO缓冲区
     memcpy((char *)memh.data(), buf, size);
+    // 直接刷新数据到存储
     auto ret = flushBuf(req, pi, off, memh, size, false);
 
+    // 记录写操作延迟
     writeLatency.addSample(SteadyClock::now() - start, monitor::TagSet{{"uid", uids}});
 
+    // 回复写入结果
     if (ret >= 0) {
       fuse_reply_write(req, ret);
     }
     return;
   }
 
+  // 缓冲IO路径：使用写缓冲区提高性能
   if (!wb) {
+    // 如果没有写缓冲区，创建并注册一个
     auto wb2 = std::make_shared<InodeWriteBuf>();
     wb2->buf.resize(d.config->io_bufs().write_buf_size());
+    // 注册storage buffer  （wb2->buf与wb2->memh共享同一内存区域）
     auto ret = d.storageClient->registerIOBuffer(wb2->buf.data(), wb2->buf.size());
     if (!ret) {
       handle_error(req, ret);
       return;
     }
     wb2->memh.reset(new storage::client::IOBuffer(std::move(*ret)));
-    pi->writeBuf = wb2;  //.compare_exchange_strong(wb, wb2);
+    pi->writeBuf = wb2;
     if (!wb) {
       wb = wb2;
     }
   }
 
-  // std::lock_guard lock(wb->mtx);
+  // 处理写入操作
   {
+    // 如果缓冲区有数据且偏移量不连续，先刷新缓冲区 
+    // 当前写入位置 off 与上次写入的末尾位置 wb->off + wb->len 不连续
     if (wb->len && wb->off + (ssize_t)wb->len != off) {
       XLOGF(DBG, "to flush due to inconsecutive off {} prev off {} len {}", off, wb->off, wb->len);
       if (flushBuf(req, pi, wb->off, *wb->memh, wb->len, true) < 0) {
@@ -1672,16 +1699,21 @@ void hf3fs_write(fuse_req_t req, fuse_ino_t fino, const char *buf, size_t size, 
       wb->len = 0;
     }
 
+    // 如果缓冲区为空，更新偏移量
     if (!wb->len) {
       wb->off = off;
     }
 
+    // 将数据复制到缓冲区，如果缓冲区已满则刷新  （数据聚合）
     size_t done = 0;
     do {
+      // 计算本次可复制的数据长度
       auto cplen = std::min(size - done, wb->buf.size() - wb->len);
+      // 复制数据到缓冲区，memcpy 不是系统调用，它是C标准库中的一个内存操作函数
       memcpy(wb->buf.data() + wb->len, buf + done, cplen);
       wb->len += cplen;
       done += cplen;
+      // 如果缓冲区已满，刷新数据
       if (wb->len == wb->buf.size()) {
         XLOGF(DBG, "flush full buf {}", wb->len);
         if (flushBuf(req, pi, wb->off, *wb->memh, wb->len, true) < 0) {
@@ -1694,13 +1726,15 @@ void hf3fs_write(fuse_req_t req, fuse_ino_t fino, const char *buf, size_t size, 
       }
     } while (done < size);
 
+    // 如果缓冲区还有未刷新的数据，将inode添加到脏列表，后台任务会处理刷新
     if (wb->len) {
-      // notify background task to flush buf and sync
       getFuseClientsInstance().dirtyInodes.lock()->insert(ino);
     }
   }
 
+  // 记录写操作延迟
   writeLatency.addSample(SteadyClock::now() - start, monitor::TagSet{{"uid", uids}});
+  // 回复写入成功，返回写入的数据大小
   fuse_reply_write(req, size);
 }
 
