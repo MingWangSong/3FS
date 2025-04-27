@@ -5,7 +5,7 @@
 #include "common/utils/SysResource.h"
 
 namespace hf3fs::fuse {
-// 完成应用信息的函数
+// 完成应用信息的函数  ,通过获取主机标签来完善应用的元数据信息,为后续的应用运行提供必要的配置信息
 Result<Void> FuseConfigFetcher::completeAppInfo(flat::AppInfo &appInfo [[maybe_unused]]) {
   // 获取主机名
   auto hostnameRes = SysResource::hostname(/*physicalMachineName=*/true);

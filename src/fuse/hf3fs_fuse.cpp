@@ -3,6 +3,7 @@
 #include "FuseApplication.h"
 
 int main(int argc, char *argv[]) {
+  // 绕过 gflags 的单次解析限制
   gflags::AllowCommandLineReparsing();
   using namespace hf3fs;
   return fuse::FuseApplication().run(argc, argv);
