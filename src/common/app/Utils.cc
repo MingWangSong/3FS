@@ -301,6 +301,26 @@ std::unique_ptr<ConfigCallbackGuard> makeMemConfigUpdateCallback(memory::MemoryA
   });
 }
 
+String loadConfigFromLauncher(std::function<Result<std::pair<String, String>>()> launcher) {
+  XLOGF(INFO, "Start load config from launcher");
+  auto retryInterval = std::chrono::milliseconds(10);
+  constexpr auto maxRetryInterval = std::chrono::milliseconds(1000);
+  for (int i = 0; i < 20; ++i) {
+    auto loadConfigRes = launcher();
+    if (loadConfigRes) {
+      const auto &[content, desc] = *loadConfigRes;
+      XLOGF(INFO, "Load config from launcher finished {}", desc);
+      return content;
+    }
+
+    XLOGF(CRITICAL, "Load config by launcher failed: {}\nretryCount: {}", loadConfigRes.error(), i);
+    std::this_thread::sleep_for(retryInterval);
+    retryInterval = std::min(2 * retryInterval, maxRetryInterval);
+  }
+  XLOGF(FATAL, "Load config from launcher failed, stop retrying");
+  __builtin_unreachable();
+}
+
 /**
  * @brief 从启动器加载应用信息
  * @param launcher 启动器函数
