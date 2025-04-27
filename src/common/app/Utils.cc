@@ -414,7 +414,7 @@ void initConfig(config::IConfig &cfg,
   // 通过移动语义可以避免不必要的拷贝，提高性能
   auto configTemplate = loadConfigTemplate(cfg, std::move(launcher));
   XLOGF(INFO, "Full Config Template:\n{}", configTemplate);
-  auto renderRes = hf3fs::renderConfig(configTemplate, &appInfo);
+  auto renderRes = hf3fs::renderConfig(configTemplate, &appInfo);  //直接返回configTemplate
   XLOGF_IF(FATAL, !renderRes, "Render config failed: {}\nTemplate: {}", renderRes.error(), configTemplate);
 
   auto initRes = cfg.atomicallyUpdate(std::string_view(*renderRes), /*isHotUpdate=*/false);

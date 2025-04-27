@@ -93,6 +93,7 @@ Result<Void> FuseApplication::Impl::initApplication() {
   app_detail::initConfig(hf3fsConfig, configFlags_, appInfo, [this] { return launcher_->loadConfigTemplate(); });
   XLOGF(INFO, "Server config inited");
 
+  // 初始化日志和监控服务(所以实际上，日志文件从这开始记录)
   app_detail::initCommonComponents(hf3fsConfig.common(), kName, appInfo.nodeId);
 
   onLogConfigUpdated_ = app_detail::makeLogConfigUpdateCallback(hf3fsConfig.common().log(), kName);
