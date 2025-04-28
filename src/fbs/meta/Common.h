@@ -164,6 +164,7 @@ class InodeId {
   // 0xfffffffe80000000
   static constexpr InodeId setConf() { return InodeId(-((uint64_t)3 << 31)); }
 
+  // 显式构造函数,防止隐式转换,编译时常量表达式
   explicit constexpr InodeId(uint64_t val = 0)
       : val_(val) {}
 

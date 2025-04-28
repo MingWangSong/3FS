@@ -66,6 +66,9 @@ Result<Void> EventLoop::add(const std::shared_ptr<EventHandler> &handler, uint32
   HandlerWrapper *wrapper = nullptr;
   {
     auto lock = std::unique_lock(mutex_);
+    // 在wrapperList_链表的头部插入一个新的HandlerWrapper对象
+    // 使用emplace_front可以直接在链表中构造对象,避免额外的拷贝
+    // handler是一个shared_ptr,被包装在HandlerWrapper中作为weak_ptr存储
     wrapperList_.emplace_front(HandlerWrapper{handler});
     handler->it_ = wrapperList_.begin();
     handler->eventLoop_ = weak_from_this();
@@ -164,6 +167,9 @@ void EventLoop::loop() {
       std::list<HandlerWrapper>::iterator it;
       // limit the number of deletions in a single iteration.
       for (auto i = 0ul; i < kDeleteQueueWakeUpLoopThreshold && deleteQueue_.try_dequeue(it); ++i) {
+        // 从包装器列表中删除指定的迭代器位置的元素
+        // 这里删除之前已经从epoll中移除的处理器的包装对象
+        // 由于在事件循环线程中执行删除操作,所以是线程安全的
         wrapperList_.erase(it);
       }
     }

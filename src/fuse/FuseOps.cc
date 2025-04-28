@@ -404,6 +404,7 @@ const std::vector<NameInode> topVirtDirs{
      Inode{InodeId::setConf(), InodeData{Directory{InodeId{virtDirInode.id}}, Acl{Uid{0}, Gid{0}, Permission{0777}}}}},
 };
 
+// 不是虚拟目录下的目录则返回nullopt
 std::optional<std::string> checkVirtDir(InodeId ino, const Inode **inode = nullptr) {
   if (ino == virtDirInode.id) {  // virtual dir /3fs-virt
     if (inode) {
@@ -680,6 +681,7 @@ void hf3fs_lookup(fuse_req_t req, fuse_ino_t fparent, const char *name) {
 
   auto userInfo = UserInfo(flat::Uid(fuse_req_ctx(req)->uid), flat::Gid(fuse_req_ctx(req)->gid), d.fuseToken);
 
+  // fuse_entry_param 它包含了文件/目录的基本属性，如 inode 号、权限、时间戳等
   struct fuse_entry_param e;
   init_entry(&e, d.userConfig.getConfig(userInfo).attr_timeout(), d.userConfig.getConfig(userInfo).entry_timeout());
   
@@ -1710,6 +1712,7 @@ void hf3fs_write(fuse_req_t req, fuse_ino_t fino, const char *buf, size_t size, 
       // 计算本次可复制的数据长度
       auto cplen = std::min(size - done, wb->buf.size() - wb->len);
       // 复制数据到缓冲区，memcpy 不是系统调用，它是C标准库中的一个内存操作函数
+      // 将buf + done数据拷贝到wb->buf.data()，拷贝长度为cplen
       memcpy(wb->buf.data() + wb->len, buf + done, cplen);
       wb->len += cplen;
       done += cplen;
@@ -2668,8 +2671,8 @@ CoTryTask<uint64_t> RcInode::beginWrite(flat::UserInfo userInfo,
                                         meta::client::MetaClient &meta,
                                         uint64_t offset,
                                         uint64_t length) {
-  auto stripe = std::min((uint32_t)folly::divCeil(offset + length, (uint64_t)inode.asFile().layout.chunkSize),
-                         inode.asFile().layout.stripeSize);
+  // auto stripe = std::min((uint32_t)folly::divCeil(offset + length, (uint64_t)inode.asFile().layout.chunkSize),
+  //                        inode.asFile().layout.stripeSize);
   {
     auto guard = dynamicAttr.rlock();
     if (!guard->dynStripe || guard->dynStripe >= stripe) {

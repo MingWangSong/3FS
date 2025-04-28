@@ -287,14 +287,21 @@ namespace hf3fs::fuse {
 
   struct IoRingTable {
     void init(int cap) {
+      // 初始化信号量sems
       for (int prio = 0; prio <= 2; ++prio) {
         auto sp = "/" + semOpenPath(prio);
+        // 创建并打开一个命名信号量,用于IO提交通知
+        // - 初始值为0
+        // 删除器负责:
+        // 1. 关闭信号量(sem_close)
+        // 2. 删除信号量名称(sem_unlink) 
         sems.emplace_back(sem_open(sp.c_str(), O_CREAT, 0666, 0), [sp](sem_t *p) {
-          sem_close(p);
+          sem_close(p);  
           sem_unlink(sp.c_str());
         });
         chmod(semPath(prio).c_str(), 0666);
       }
+      // 初始化ioRings
       ioRings = std::make_unique<AtomicSharedPtrTable<IoRing>>(cap);
     }
     Result<int> addIoRing(const Path &mountName,
@@ -320,11 +327,19 @@ namespace hf3fs::fuse {
       return idx;
     }
     void rmIoRing(int idx) { ioRings->remove(idx); }
+    // 存储信号量指针的向量,每个优先级一个信号量
+    // 使用unique_ptr管理信号量生命周期,自定义删除器负责关闭和删除信号量
+    // sem_t* - POSIX信号量指针
+    // std::function<void(sem_t*)> - 删除器函数类型,接收信号量指针并执行清理
     std::vector<std::unique_ptr<sem_t, std::function<void(sem_t *)>>> sems;
+    // 存储IoRing对象的原子共享指针表
+    // - AtomicSharedPtrTable: 线程安全的共享指针表,支持并发访问
+    // - unique_ptr: 独占所有权的智能指针,负责表的生命周期管理
     std::unique_ptr<AtomicSharedPtrTable<IoRing>> ioRings;
 
   private:
     static std::string semOpenPath(int prio) {
+      // 生成一个随机UUID作为信号量名称的一部分（静态）
       static std::vector<Uuid> semIds{Uuid::random(), Uuid::random(), Uuid::random()};
       return fmt::format("hf3fs-submit-ios.{}", semIds[prio].toHexString());
     }
@@ -337,11 +352,20 @@ namespace hf3fs::fuse {
     static meta::Inode lookupSem(int prio) {
       static const std::vector<meta::Inode> inodes{
           {meta::InodeId{meta::InodeId::iovDir().u64() - 1},
-          meta::InodeData{meta::Symlink{semPath(0)}, meta::Acl{meta::Uid{0}, meta::Gid{0}, meta::Permission{0666}}}},
+           meta::InodeData{meta::Symlink{semPath(0)}, 
+                           meta::Acl{meta::Uid{0}, 
+                                     meta::Gid{0}, 
+                                     meta::Permission{0666}}}},
           {meta::InodeId{meta::InodeId::iovDir().u64() - 2},
-          meta::InodeData{meta::Symlink{semPath(1)}, meta::Acl{meta::Uid{0}, meta::Gid{0}, meta::Permission{0666}}}},
+           meta::InodeData{meta::Symlink{semPath(1)}, 
+                           meta::Acl{meta::Uid{0}, 
+                                     meta::Gid{0}, 
+                                     meta::Permission{0666}}}},
           {meta::InodeId{meta::InodeId::iovDir().u64() - 3},
-          meta::InodeData{meta::Symlink{semPath(2)}, meta::Acl{meta::Uid{0}, meta::Gid{0}, meta::Permission{0666}}}}};
+           meta::InodeData{meta::Symlink{semPath(2)}, 
+                           meta::Acl{meta::Uid{0}, 
+                                     meta::Gid{0}, 
+                                     meta::Permission{0666}}}}};
 
       return inodes[prio];
     }

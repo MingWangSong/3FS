@@ -101,7 +101,7 @@ int fuseMainLoop(const String &programName,
   }
 
   // 创建FUSE会话并与FuseClients实例关联
-  d.se = fuse_session_new(&args, &ops, sizeof(ops), NULL);
+  d.se =  (&args, &ops, sizeof(ops), NULL);
   if (d.se == nullptr) {
     return 1;
   }
