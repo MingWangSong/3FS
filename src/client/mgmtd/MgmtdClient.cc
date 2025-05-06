@@ -170,6 +170,7 @@ struct MgmtdClient::Impl {
   template <typename F>
   auto withRetry(std::string_view methodName, F &&f) -> std::invoke_result_t<F, MgmtdStub &> {
     ProbeContext probeContext;
+    // 与mgmtd服务连接
     if (primaryMgmtdId_ == 0) CO_RETURN_ON_ERROR(co_await connect(probeContext));
 
     for (bool retried = false;;) {
@@ -387,6 +388,7 @@ struct MgmtdClient::Impl {
         [&](RefreshWorkItem &item) -> CoTask<bool> {
           XLOGF(DBG, "MgmtdClient: receive RefreshItem force={}", item.force);
           RefreshOp op(item.force);
+          // 展开宏定义为op.handle(*this)
           auto res = co_await [&]() -> CoTryTask<void> { CO_INVOKE_OP_INFO(op, "", *this); }();
           if (item.promise) {
             item.promise->setValue(std::move(res));
@@ -411,7 +413,8 @@ struct MgmtdClient::Impl {
           co_return false;
         });
     for (;;) {
-      auto item = co_await workItems_.dequeue();
+      // 工作队列
+      auto item = co_await workItems_.dequeue();  // 在队列为空时会挂起协程，直到有新工作项入队
       auto exitTag = co_await std::visit(handler, item->variant);
       if (exitTag) {
         break;
@@ -420,7 +423,7 @@ struct MgmtdClient::Impl {
   }
 
   CoTryTask<void> connect(ProbeContext &probeContext) {
-    CO_RETURN_ON_ERROR(initMgmtds());
+    CO_RETURN_ON_ERROR(initMgmtds());  // 读配置文件，获取MgmtdIP
     XLOGF(INFO, "MgmtdClient: start probe for connecting ...");
     auto primaryRes = co_await probePrimary(probeContext);
     if (!primaryRes.hasError() && primaryRes->has_value()) {
@@ -453,6 +456,7 @@ struct MgmtdClient::Impl {
   CoTryTask<void> refreshRoutingInfo(bool force) {
     auto [item, waitItem] = WorkItem::makeItemWithWaiter<RefreshWorkItem>(force);
     CO_RETURN_ON_ERROR(tryEnqueue(std::move(item)));
+    // waitItem是folly::coro::Task对象，用于同步等待异步操作完成
     co_return co_await std::move(waitItem);
   }
 
@@ -570,6 +574,7 @@ struct MgmtdClient::Impl {
       auto res = co_await probePrimary(probeContext, conn);
       if (!res.hasError() || res.error().code() != kSkipThisNode) co_return res;
     }
+    // 初始化调用
     co_return co_await probeUnknownAddrs(probeContext);
   }
 
@@ -603,6 +608,7 @@ struct MgmtdClient::Impl {
     auto curRoutingInfo = currentInfo ? currentInfo->raw() : nullptr;
     auto currentVersion = curRoutingInfo ? curRoutingInfo->routingInfoVersion : flat::RoutingInfoVersion(0);
 
+    // 通信请求RoutingInfo
     auto res = co_await withRetry("RefreshRoutingInfo", [&](MgmtdStub &stub) -> CoTryTask<mgmtd::GetRoutingInfoRsp> {
       co_return co_await stub.getRoutingInfo(
           mgmtd::GetRoutingInfoReq::create(clusterId_, force ? flat::RoutingInfoVersion{0} : currentVersion));

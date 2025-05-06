@@ -472,9 +472,7 @@ CoTryTask<ssize_t> flushBuf(const flat::UserInfo &user,
   auto begin = co_await pi->beginWrite(user, *d.metaClient, off, len);
   CO_RETURN_ON_ERROR(begin);
   auto truncateVer = *begin;
-  // 创建一个RAII风格的错误处理守卫对象
-  // 如果函数正常退出前没有调用dismiss()，则在作用域结束时会自动执行finishWrite
-  // 用于确保在发生错误时能正确清理写入状态
+
   auto onError = folly::makeGuard([&]() { pi->finishWrite(user, truncateVer, off, -1); });
 
   size_t done = 0;
@@ -2671,8 +2669,10 @@ CoTryTask<uint64_t> RcInode::beginWrite(flat::UserInfo userInfo,
                                         meta::client::MetaClient &meta,
                                         uint64_t offset,
                                         uint64_t length) {
-  // auto stripe = std::min((uint32_t)folly::divCeil(offset + length, (uint64_t)inode.asFile().layout.chunkSize),
-  //                        inode.asFile().layout.stripeSize);
+  // 计算需要的stripe数量
+  // 1. 根据offset和length计算需要的chunk数量
+  // 2. 取chunk数量和最大stripe数量的较小值
+  auto stripe = std::min((uint32_t)folly::divCeil(offset + length, (uint64_t)inode.asFile().layout.chunkSize), inode.asFile().layout.stripeSize);
   {
     auto guard = dynamicAttr.rlock();
     if (!guard->dynStripe || guard->dynStripe >= stripe) {
@@ -2683,6 +2683,7 @@ CoTryTask<uint64_t> RcInode::beginWrite(flat::UserInfo userInfo,
 
   // only allow 1 task extend stripe
   co_await extendStripeLock.co_lock();
+  // 获取锁后再次检查
   SCOPE_EXIT { extendStripeLock.unlock(); };
   {
     // check stripe again

@@ -120,7 +120,7 @@ Result<Void> FuseClients::init(const flat::AppInfo &appInfo,
     RETURN_ON_ERROR(client->start()); // 启动客户端，失败则返回错误
   }
   // 创建网络客户端通信上下文生成器，用于RPC通信
-  auto ctxCreator = [this](net::Addr  ess addr) { return client->serdeCtx(addr); };
+  auto ctxCreator = [this](net::Address addr) { return client->serdeCtx(addr); };
 
   // 创建管理服务客户端（用于集群管理通信）
   if (!mgmtdClient) {

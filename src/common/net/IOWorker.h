@@ -36,8 +36,8 @@ class IOWorker {
   };
 
   IOWorker(Processor &processor,
-           CPUExecutorGroup &executor,
-           folly::IOThreadPoolExecutor &connExecutor,
+           CPUExecutorGroup &executor,   //io线程池
+           folly::IOThreadPoolExecutor &connExecutor,   //连接线程池
            const Config &config)
       : processor_(processor),
         executor_(executor),
@@ -122,8 +122,8 @@ class IOWorker {
 
   std::unique_ptr<ConfigCallbackGuard> ibsocketConfigGuard_;
 
-  ConcurrencyLimiter<Address> connectConcurrencyLimiter_;
 
+  ConcurrencyLimiter<Address> connectConcurrencyLimiter_;  // 连接并发限制器
   constexpr static size_t kStopFlag = 1;
   constexpr static size_t kCountInc = 2;
   std::atomic<size_t> flags_{0};

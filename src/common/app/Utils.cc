@@ -409,9 +409,7 @@ void initConfig(config::IConfig &cfg,
                 const std::vector<config::KeyValue> &updates,
                 const flat::AppInfo &appInfo,
                 std::function<Result<std::pair<String, String>>()> launcher) {
-  // std::move(launcher)将launcher参数转换为右值引用，使其所有权可以被转移
-  // 这里使用std::move是因为launcher是一个函数对象，我们不再需要在这个作用域使用它
-  // 通过移动语义可以避免不必要的拷贝，提高性能
+  // std::move(launcher)将launcher参数转换为右值引用，通过移动语义可以避免不必要的拷贝，提高性能
   auto configTemplate = loadConfigTemplate(cfg, std::move(launcher));
   XLOGF(INFO, "Full Config Template:\n{}", configTemplate);
   auto renderRes = hf3fs::renderConfig(configTemplate, &appInfo);  //直接返回configTemplate

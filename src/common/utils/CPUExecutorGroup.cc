@@ -17,18 +17,27 @@ using EndTaskPredicate = std::decay_t<decltype(isEndTask)>;
 
 template <template <typename, typename> typename QueueTemplate>
 std::vector<std::unique_ptr<folly::CPUThreadPoolExecutor>> createExecutors(const String &name, size_t count) {
+  // 创建执行器向量并预分配空间
   std::vector<std::unique_ptr<folly::CPUThreadPoolExecutor>> executors;
   executors.reserve(count);
 
+  // 定义队列类型
   using Queue = QueueTemplate<Task, EndTaskPredicate>;
 
+  // 创建命名线程工厂
   auto threadFactory = std::make_shared<folly::NamedThreadFactory>(name);
+  // 创建队列共享状态
   auto sharedState = std::make_shared<typename Queue::SharedState>(count);
+  // 设置每个执行器的线程数为1
   auto pair = std::make_pair(1U, 1U);
 
+  // 创建指定数量的执行器
   for (size_t i = 0; i < count; ++i) {
+    // 为每个执行器创建队列
     auto queue = std::make_unique<Queue>(sharedState, i, isEndTask);
+    // 创建CPU线程池执行器
     auto executor = std::make_unique<folly::CPUThreadPoolExecutor>(pair, std::move(queue), threadFactory);
+    // 添加到执行器列表
     executors.push_back(std::move(executor));
   }
   return executors;

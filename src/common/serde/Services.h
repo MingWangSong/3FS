@@ -9,7 +9,7 @@
 
 namespace hf3fs::serde {
 
-// RPC框架中起到了服务注册表的作用
+// RPC框架中起到了服务注册的作用
 class Services {
  public:
   Services() { addService(std::make_unique<echo::ServiceImpl>(), true); }

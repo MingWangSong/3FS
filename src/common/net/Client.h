@@ -78,6 +78,7 @@ class Client {
   }
 
  private:
+  // 注册服务
   serde::Services serdeServices_;
   const Config &config_;
 

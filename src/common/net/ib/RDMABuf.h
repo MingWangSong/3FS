@@ -343,6 +343,7 @@ class RDMABufPool : public std::enable_shared_from_this<RDMABufPool>, folly::Mov
   size_t bufSize_;
   std::atomic<size_t> bufAllocated_;
 
+  // 缓冲区数量
   folly::fibers::Semaphore sem_;
   std::mutex mutex_;
   std::deque<RDMABuf::Inner *> freeList_;

@@ -94,6 +94,7 @@ TruncateChunkOp StorageClient::createTruncateOp(ChainId chainId,
   return TruncateChunkOp(requestId, chainId, chunkId, chunkLen, chunkSize, onlyExtendChunk, userCtx);
 }
 
+// 用户空间的缓冲区转换为RDMA可用的缓冲区
 Result<IOBuffer> StorageClient::registerIOBuffer(uint8_t *buf, size_t len) {
   monitor::ScopedLatencyWriter latencyWriter(iobuf_reg_latency);
   iobuf_reg_size.addSample(len);
