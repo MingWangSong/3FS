@@ -31,6 +31,7 @@ using Callable = std::function<CoTask<void>(Impl &)>;
 
 bool isNetworkError(status_code_t code) { return StatusCode::typeOf(code) == StatusCodeType::RPC; }
 
+// T: 具体工作项   Value：返回类型
 template <typename T, typename Value>
 struct WorkItemBase {
   std::optional<folly::coro::Promise<Result<Value>>> promise;
