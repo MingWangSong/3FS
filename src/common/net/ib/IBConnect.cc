@@ -394,6 +394,8 @@ CoTryTask<void> IBSocket::connect(serde::ClientContext &ctx, Duration timeout) {
   if (checkConfig() != 0) {
     co_return makeError(StatusCode::kInvalidConfig, "IBSocket invalid configuration");
   }
+
+  // 创建QP（Queue Pair）是 RDMA 技术中的队列对，包括SQ和RQ
   if (qpCreate() != 0) {
     co_return makeError(RPCCode::kConnectFailed, "IBSocket failed to create QP.");
   }

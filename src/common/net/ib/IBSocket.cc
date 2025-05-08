@@ -279,6 +279,8 @@ Result<Void> IBSocket::RDMAReqBatch::add(RDMARemoteBuf remoteBuf, std::span<RDMA
   if (UNLIKELY(!rkey.has_value())) {
     return makeError(StatusCode::kInvalidArg);
   }
+  
+  // 处理所有本地缓冲区
   while (!localBufs.empty()) {
     auto cnt = std::min((size_t)socket_->connectConfig_.max_sge, localBufs.size());
     auto lbufs = localBufs.first(cnt);
@@ -291,13 +293,18 @@ Result<Void> IBSocket::RDMAReqBatch::add(RDMARemoteBuf remoteBuf, std::span<RDMA
       }
       total += buf.size();
     }
+    
+    // 获取远程地址并尝试前进total字节
     auto raddr = remoteBuf.addr();
     auto advance = remoteBuf.advance(total);
     if (UNLIKELY(!advance || total > socket_->port_.attr().max_msg_sz)) {
       XLOGF(ERR, "RDMAReqBatch::add invalid args, {} {} {}", advance, total, socket_->port_.attr().max_msg_sz);
       return makeError(StatusCode::kInvalidArg);
     }
+    
+    // 将本地缓冲区添加到批处理中
     localBufs_.insert(localBufs_.end(), lbufs.begin(), lbufs.end());
+    // 创建RDMA请求，记录远程地址、rkey、本地缓冲区的起始索引和数量
     reqs_.emplace_back(raddr, rkey.value(), localBufs_.size() - lbufs.size(), lbufs.size());
   }
 
@@ -940,16 +947,20 @@ CoTryTask<void> IBSocket::rdmaBatch(ibv_wr_opcode opcode,
     }
   }
 
+
+  // 发送请求
   if (posts.size() == 1) {
+    // 单批次
     auto result = co_await rdmaPost(posts[0]);
     CO_RETURN_ON_ERROR(result);
   } else {
+    // 多批次
     std::vector<CoTryTask<void>> tasks;
     tasks.reserve(numPosts);
     for (size_t i = 0; i < numPosts; i++) {
       tasks.emplace_back(rdmaPost(posts[i]));
     }
-
+    // 并行等待所有批次完成
     auto results = co_await folly::coro::collectAllRange(std::move(tasks));
     for (auto &result : results) {
       CO_RETURN_ON_ERROR(result);
@@ -1006,8 +1017,8 @@ CoTryTask<void> IBSocket::rdmaPost(RDMAPostCtx &ctx) {
 
 int IBSocket::rdmaPostWR(RDMAPostCtx &ctx) {
   static thread_local folly::small_vector<ibv_send_wr, 256> wrs;
-  static thread_local folly::small_vector<ibv_sge, 2048> sges;
   wrs.clear();
+  static thread_local folly::small_vector<ibv_sge, 2048> sges;
   sges.clear();
 
   XLOGF_IF(FATAL, ctx.reqs.empty(), "Empty reqs");
