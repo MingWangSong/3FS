@@ -124,6 +124,7 @@ struct MgmtdClient::Impl {
   CoTryTask<void> retryOnError(ProbeContext &probeContext, Conn &conn, Status &error) {
     auto switchRes = co_await trySwitchProbeTarget(probeContext, conn, error);
     if (switchRes.hasError() && switchRes.error().code() != kSkipThisNode) CO_RETURN_ERROR(switchRes);
+    // 更换Mgmtd主节点
     if (!switchRes.hasError()) {
       if (*switchRes == conn.nodeId) co_return Void{};
       primaryMgmtdId_ = *switchRes;
@@ -779,6 +780,7 @@ struct MgmtdClient::Impl {
 
 namespace {
 #define DEFINE_SERDE_SERVICE_METHOD_FULL(svc, name, Name, id, reqtype, rsptype)             \
+  // ##表示连接符
   struct Name##Op : core::ServiceOperationWithMetric<"MgmtdClient", #Name, "op"> {          \
     using ReqType = mgmtd::reqtype;                                                         \
     using ResType = mgmtd::rsptype;                                                         \
@@ -788,6 +790,7 @@ namespace {
         : req(ReqType::create(std::forward<Args>(args)...)) {}                              \
                                                                                             \
     std::string_view methodName() const { return #Name; }                                   \
+    // #Name 变成 "{Name}"
     String toStringImpl() const final { return #Name; }                                     \
                                                                                             \
     CoTryTask<ResType> handle(Impl &impl) {                                                 \
