@@ -52,6 +52,7 @@ class SerdeStubFactory {
       std::string_view host_;
     };
 
+    // 根据实际类型调用operator
     return std::visit(MakeStub(addr, node, host), ctx_);
   }
 

@@ -96,6 +96,7 @@ class MethodExtractor {
                              const REQ &req,                                                               \
                              const ::hf3fs::net::UserRequestOptions *options = nullptr,                    \
                              ::hf3fs::serde::Timestamp * timestamp = nullptr) {                            \
+    // 例如：ClientContext类中的call方法
     co_return co_await ctx.template call<kServiceNameWrapper, #NAME, REQ, RSP, kServiceID, ID>(req,        \
                                                                                                options,    \
                                                                                                timestamp); \
