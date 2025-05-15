@@ -117,8 +117,10 @@ void IOWorker::startReadTask(Transport *transport, bool error, bool logError /* 
 void IOWorker::startWriteTask(Transport *transport, bool error, bool logError /* = true */) {
   if ((transport->isTCP() && config_.read_write_tcp_in_event_thread()) ||
       (transport->isRDMA() && config_.read_write_rdma_in_event_thread())) {
+    // 直接在当前线程执行
     transport->doWrite(error, logError);
   } else {
+    // 丢给线程池执行
     executor_.pickNextFree().add(
         [tr = transport->shared_from_this(), error, logError] { tr->doWrite(error, logError); });
   }

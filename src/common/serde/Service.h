@@ -92,11 +92,13 @@ class MethodExtractor {
   static constexpr auto NAME##MethodId = ID;                                                               \
                                                                                                            \
   template <class Context>                                                                                 \
+  // 以stat为例：static CoTryTask<StatRsp> stat(Context &ctx,
   static CoTryTask<RSP> NAME(Context &ctx,                                                                 \
                              const REQ &req,                                                               \
                              const ::hf3fs::net::UserRequestOptions *options = nullptr,                    \
                              ::hf3fs::serde::Timestamp * timestamp = nullptr) {                            \
     // 例如：ClientContext类中的call方法
+    // 以stat为例：co_await context_.template call<"MetaSerde", "stat", StatReq, StatRsp, 4, 2>(req, &options, timestamp)
     co_return co_await ctx.template call<kServiceNameWrapper, #NAME, REQ, RSP, kServiceID, ID>(req,        \
                                                                                                options,    \
                                                                                                timestamp); \

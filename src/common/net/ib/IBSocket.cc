@@ -637,6 +637,7 @@ Result<size_t> IBSocket::send(folly::ByteRange buf) {
     buf.advance(wsize);
     total += wsize;
 
+    // sendBuf没有剩余空间，即已经填满数据
     if (sendBuf.empty()) {
       sendBufs_.pop();
       if (UNLIKELY(postSend(sendBufIdx, sendBufs_.getBufSize()))) {

@@ -98,6 +98,7 @@ class ClientContext {
       co_return makeError(std::move(item.status));
     }
 
+    // 反序列化响应数据
     Result<Rsp> rsp = makeError(StatusCode::kUnknown);
     auto deserializeResult = serde::deserialize(rsp, item.packet.payload);
     if (UNLIKELY(!deserializeResult)) {

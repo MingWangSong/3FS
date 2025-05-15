@@ -27,6 +27,7 @@ namespace hf3fs::net {
 class SerdeBuffer {
  public:
   // buffer to write, include message header and content.
+  // 获取去除headroom_有效地址
   uint8_t *buff() { return self() + headroom_; }
   const uint8_t *buff() const { return self() + headroom_; }
 
@@ -129,6 +130,7 @@ struct WriteItem {
   template <serde::SerdeType T>
   static auto createMessage(const T &packet, const CoreRequestOptions &options) {
     auto item = Pool::get();
+    // 创建网络传输消息
     item->buf = SerdeBuffer::create(packet, options);
     item->maxRetryTimes = options.sendRetryTimes;
     return item;
@@ -157,6 +159,7 @@ class WriteList {
 
   WriteList extractForRetry();
 
+  // 将另一个 WriteList 对象 o 连接到当前 WriteList 对象的末尾
   void concat(WriteList &&o) {
     if (o.empty()) {
       return;
@@ -180,6 +183,7 @@ class WriteList {
 
 class WriteListWithProgress : public WriteList {
  public:
+  // 使用 using 声明来继承基类 WriteList 的所有构造函数
   using WriteList::WriteList;
 
   uint32_t toIOVec(struct iovec *iovec, uint32_t len, size_t &size);
