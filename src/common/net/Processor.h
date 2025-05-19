@@ -129,6 +129,7 @@ class Processor {
       }
     }
 
+    // 反序列化
     auto view = std::string_view{reinterpret_cast<const char *>(buf->data()), buf->length()};
     serde::MessagePacket<> packet;
     auto deserializeResult = serde::deserialize(packet, view);
@@ -192,7 +193,7 @@ class Processor {
     if (coroutinesPoolGetter_) {
       coroutinesPoolGetter_(packet).enqueue(processSerdeRequest(std::move(buff), packet, std::move(tr)));
     } else {
-      processSerdeRequest(std::move(buff), packet, std::move(tr)).scheduleOn(&executor_.pickNext()).start();
+       (std::move(buff), packet, std::move(tr)).scheduleOn(&executor_.pickNext()).start();
     }
   }
 

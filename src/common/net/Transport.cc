@@ -204,6 +204,7 @@ void Transport::doRead(bool error, bool logError /* = true */) {
     }
 
     auto readSize = result.value();
+    // 无数据处理
     if (readSize == 0) {
       auto action = tryToSuspend<kReadNewWakedFlag, kReadAvailableFlag, "read_available">();
       if (action == Action::Suspend) {
@@ -218,8 +219,9 @@ void Transport::doRead(bool error, bool logError /* = true */) {
 
     readBytes.addSample(readSize);
     batchReadSize.addSample(readSize);
-    readBuff_->append(readSize);
 
+    // 消息解析
+    readBuff_->append(readSize);
     MessageWrapper msgWrapper(std::move(readBuff_));
     while (msgWrapper.headerComplete()) {
       // check message size.
@@ -236,6 +238,7 @@ void Transport::doRead(bool error, bool logError /* = true */) {
       }
     }
 
+    // 消息分发
     if (msgWrapper.hasMessages()) {
       // allocate a new read buffer with remaining incomplete message.
       readBuff_ = msgWrapper.createFromRemain(kMessageReadBufferSize);
@@ -304,6 +307,7 @@ Transport::Action Transport::writeAll() {
   });
 
   constexpr uint32_t kMaxBatchSize = 64;
+  // 记录buf地址和buf len
   struct iovec iov[kMaxBatchSize];
 
   while (!inWritingList_.empty()) {

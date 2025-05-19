@@ -409,10 +409,10 @@ class IBSocket : public Socket, folly::MoveOnly {
     size_t getBufSize() const { return bufSize_; }
 
    protected:
-    uint8_t *ptr_ = nullptr;
-    ibv_mr *mr_ = nullptr;
-    size_t bufSize_ = 0;
-    size_t bufCnt_ = 0;
+    uint8_t *ptr_ = nullptr;  // 内存块起始地址
+    ibv_mr *mr_ = nullptr;    // RDMA内存注册对象
+    size_t bufSize_ = 0;      // 单个缓冲区大小
+    size_t bufCnt_ = 0;       // 缓冲区数量
   };
 
   class SendBuffers : public Buffers {

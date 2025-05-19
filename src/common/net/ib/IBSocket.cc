@@ -600,6 +600,7 @@ Result<Void> IBSocket::checkState() {
 Result<size_t> IBSocket::send(struct iovec *iov, uint32_t cnt) {
   ssize_t total = 0;
   for (size_t i = 0; i < cnt; i++) {
+    // 创建了一个指向 iov[i].iov_base 的 ByteRange，长度为 iov[i].iov_len，用于在不复制数据的情况下传递缓冲区给 send 方法。
     auto result = send(folly::ByteRange((uint8_t *)iov[i].iov_base, iov[i].iov_len));
     RETURN_ON_ERROR(result);
 
@@ -615,6 +616,7 @@ Result<size_t> IBSocket::send(struct iovec *iov, uint32_t cnt) {
 Result<size_t> IBSocket::send(folly::ByteRange buf) {
   RETURN_ON_ERROR(checkState());
 
+  // 性能监控
   if (sendWaitBufBegin_ && !sendBufs_.empty()) {
     // record wait send buf latency
     auto begin = sendWaitBufBegin_.exchange(0);
@@ -631,6 +633,7 @@ Result<size_t> IBSocket::send(folly::ByteRange buf) {
 
     auto [sendBufIdx, sendBuf] = sendBufs_.front();
     size_t wsize = std::min(buf.size(), sendBuf.size());
+    // 将 buf 中的数据复制到 sendBuf
     memcpy(sendBuf.data(), buf.data(), wsize);
 
     sendBuf.advance(wsize);

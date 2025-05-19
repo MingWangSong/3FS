@@ -52,7 +52,9 @@ class SerdeBuffer {
   template <serde::SerdeType T, class Allocator = net::Allocator<4_KB, 1024, 64 * 1024>>
   static auto create(const T &packet, const CoreRequestOptions &options) {
     serde::Out<DownwardBytes<Allocator>> out;
+    // 序列化packet
     serde::serialize(packet, out);
+    // 添加消息头和headroom
     MessageHeader header;
     header.size = out.bytes().size();
     out.bytes().append(&header, sizeof(header));
@@ -60,6 +62,7 @@ class SerdeBuffer {
 
     uint32_t offset;
     uint32_t capacity;
+    // out.bytes().release()方法释放了包含序列化数据的内存块的所有权，并将其转换为SerdeBuffer对象
     std::unique_ptr<SerdeBuffer, Deleter<Allocator>> ptr{
         reinterpret_cast<SerdeBuffer *>(out.bytes().release(offset, capacity))};
     ptr->headroom_ = offset;  // size of headroom.
@@ -116,9 +119,13 @@ static_assert(std::is_trivial_v<SerdeBuffer>, "SerdeBuffer is not trivial");
 
 // An item containing a buffer to be written.
 struct WriteItem {
+
+  // ObjectPool第一次调用静态方法get()是实例化（惰性单例模式），没线程缓存最多存储1024 个WriteItem
   using Pool = ObjectPool<WriteItem, 1024, 64 * 1024>;
 
   std::atomic<WriteItem *> next = nullptr;
+  // decltype关键字用于获取表达式的类型，这里用来推导buf的类型
+  // 等同于SerdeBuffer::create函数的返回类型
   decltype(SerdeBuffer::create(serde::MessagePacket<>{}, {})) buf;
 
   uint32_t retryTimes = 0;

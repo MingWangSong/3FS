@@ -168,11 +168,13 @@ class ClientContext {
     auto conn = std::move(acquireConnectionResult.value());
     RETURN_AND_LOG_ON_ERROR(conn->sendSync(buff->buff(), buff->length(), startTime, options.timeout));
 
+    // 收消息头
     net::MessageHeader header;
     RETURN_AND_LOG_ON_ERROR(
         conn->recvSync(folly::MutableByteRange{reinterpret_cast<uint8_t *>(&header), net::kMessageHeaderSize},
                        startTime,
                        options.timeout));
+    // 收消息体
     auto rspBuff = net::IOBuf::createCombined(header.size);
     rspBuff->append(header.size);
     RETURN_AND_LOG_ON_ERROR(
