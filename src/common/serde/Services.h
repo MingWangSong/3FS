@@ -37,6 +37,7 @@ class Services {
 
  private:
   ConstructLog<"serde::Services"> constructLog_;
+  // 二维数组，ServiceID最大为65535
   std::array<CallContext::ServiceWrapper, 65536> services_[2];  // 0 for TCP, 1 for RDMA.
 };
 

@@ -77,6 +77,7 @@ Result<Void> Listener::setup() {
     }
   }
 
+  // 暂用不到
   if (networkType_ == Address::Type::UNIX) {
     auto port = config_.listen_port();
     if (port == 0) {
@@ -84,7 +85,6 @@ Result<Void> Listener::setup() {
     }
     addressList_.push_back(Address{config_.domain_socket_index(), port, Address::Type::UNIX});
   }
-
   if (UNLIKELY(addressList_.empty())) {
     XLOGF(ERR,
           "No available address for listener with network type: {}, filter list: {}",
@@ -92,6 +92,7 @@ Result<Void> Listener::setup() {
           fmt::join(filters, ","));
     return makeError(RPCCode::kListenFailed);
   }
+  
   for (auto &address : addressList_) {
     // Create socket and get real port.
     auto evb = connThreadPool_.getEventBase();
@@ -117,6 +118,8 @@ Result<Void> Listener::setup() {
 }
 
 Result<Void> Listener::start(ServiceGroup &group) {
+
+  // 监听RDMA处理
   if (networkType_ == Address::RDMA) {
     if (!IBManager::initialized()) {
       XLOGF(CRITICAL, "Address::Type is RDMA, but IBDevice not initialized!");
