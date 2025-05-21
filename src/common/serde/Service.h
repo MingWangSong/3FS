@@ -45,6 +45,7 @@ struct ServiceWrapper {
   static auto CollectField(::hf3fs::refl::Rank<> rank) -> refl::Helper::FieldInfoList<Service<U>>;
 };
 
+// 例如：MethodExtractor<IBConnect, CallContext, &CallContext::invalidId>;
 template <class T, class C, auto DEFAULT = nullptr>
 class MethodExtractor {
  public:
@@ -65,7 +66,10 @@ class MethodExtractor {
     if constexpr (I == std::tuple_size_v<FieldInfoList>) {
       return DEFAULT;
     } else {
+      // 通过反射机制，编译器收集 T 内部定义的所有方法信息
       using FieldInfo = std::tuple_element_t<I, FieldInfoList>;
+      // 递归查找
+      // call是否为模板成员函数在编译时是不确定的，需要使用template关键字来明确指示
       return FieldInfo::id == id ? &C::template call<FieldInfo> : calc<I + 1>(id);
     }
   }

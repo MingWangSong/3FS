@@ -80,7 +80,9 @@ auto MetaOperator::runOp(Func &&func, Arg &&arg)
       deadline = SteadyClock::now() + config_.operation_timeout();
     }
   }
+  // 创建事务对象
   auto txn = kvEngine_->createReadWriteTransaction();
+  // 生成操作对象
   auto op = ((*metaStore_).*func)(std::forward<Arg>(arg));
   auto driver = OperationDriver(*op, arg, deadline);
   co_return co_await driver.run(std::move(txn), createRetryConfig(), config_.readonly(), config_.grv_cache());

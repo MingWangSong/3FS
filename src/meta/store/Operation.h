@@ -181,7 +181,7 @@ class OperationDriver {
         XLOGF(ERR, "Request {} timeout, return error {}", describe(), result);
         break;
       }
-      // run operation
+      // run operation 调用操作核心逻辑
       result = co_await runAndCommit(*txn, operation_, duplicate);
       if (ErrorHandling::success(result)) {
         break;
