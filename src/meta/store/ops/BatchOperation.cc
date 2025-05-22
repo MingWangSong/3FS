@@ -345,6 +345,7 @@ CoTryTask<bool> BatchedOp::create(IReadWriteTransaction &txn, Inode &inode) {
     co_return false;
   }
 
+  // inode就是父目录
   if (!inode.isDirectory()) {
     for (auto &waiter : creates_) {
       waiter.get().result = makeError(MetaCode::kNotDirectory);

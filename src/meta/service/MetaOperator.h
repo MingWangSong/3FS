@@ -143,14 +143,24 @@ class MetaOperator : public folly::NonCopyableNonMovable {
   auto runOp(Func &&func, Arg &&arg)
       -> CoTryTask<typename std::invoke_result_t<Func, MetaStore, Arg &&>::element_type::RspT>;
 
+  /*
+    这个函数用于将请求添加到批处理队列中:
+      如果是新的 inodeId，创建新的批处理操作并立即执行
+      如果该 inodeId 没有等待中的批处理，创建新批处理并设为下一个执行
+      如果已有等待中的批处理:
+      如果未超过最大批处理数限制，将请求添加到现有批处理
+      如果超过限制，返回忙错误
+    主要用于将多个相同 inodeId 的操作合并执行,提高效率。
+   */
   template <typename Req, typename Rsp>
-  std::unique_ptr<BatchedOp> addBatchReq(InodeId inodeId, BatchedOp::Waiter<Req, Rsp> &waiter) {
+  std::unique_ptr<BatchedOp> addBatchReq(InodeId  , BatchedOp::Waiter<Req, Rsp> &waiter) {
     auto func = [&](auto &map) {
       auto [iter, inserted] = map.try_emplace(inodeId);
       auto &batch = iter->second;
       if (inserted) {
         assert(!batch.getNext());
         auto op = std::make_unique<BatchedOp>(*metaStore_, inodeId);
+        // 添加addReq
         op->add(waiter);
         waiter.baton.post();
         return op;

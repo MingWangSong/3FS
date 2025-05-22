@@ -122,6 +122,7 @@ CoTryTask<Rsp> MetaOperator::runInBatch(InodeId inodeId, Req req) {
     deadline = SteadyClock::now() + config_.operation_timeout();
   }
   OperationRecorder::Guard guard(OperationRecorder::server(), MetaSerde<>::getRpcName(req), req.user.uid);
+  // 根据不同的请求创建Waiter，从而来区分不同的业务操作
   BatchedOp::Waiter<Req, Rsp> waiter(std::move(req));
   auto op = addBatchReq(inodeId, waiter);
   co_await waiter.baton;
