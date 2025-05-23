@@ -100,24 +100,24 @@ class IdAllocator : folly::MoveOnly {
   }
 
   CoTryTask<uint64_t> allocateTxn(kv::IReadWriteTransaction &txn) {
+    // 1. 选择一个分片，轮询策略和随机顺序结合
     auto shardIdx = shardIdx_++;
     auto shard = shardList_[shardIdx % shardList_.size()];
     auto shardKey = getShardKey(shard);
 
-    // load old value
+    // 2. 加载当前分片的值（解析小端序）
     auto getResult = co_await txn.get(shardKey);
     CO_RETURN_ON_ERROR(getResult);
     auto unpackResult = unpackShardValue(shard, getResult.value());
     CO_RETURN_ON_ERROR(unpackResult);
     uint64_t val = unpackResult.value();
 
-    // set new value
+    // 3. 原子递增并保存新值
     auto bytes = folly::bit_cast<std::array<char, 8>>(folly::Endian::little64(val + 1));
     auto setResult = co_await txn.set(shardKey, std::string_view(bytes.begin(), bytes.size()));
     CO_RETURN_ON_ERROR(setResult);
 
-    XLOGF(DBG, "IdAllocator allocate from shard {}, val {}, id {}\n", shard, val, val * numShard_ + shard);
-
+    // 4. 计算并返回全局唯一ID
     co_return (val * numShard_) + shard;
   }
 

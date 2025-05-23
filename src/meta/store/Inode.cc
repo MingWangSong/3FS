@@ -131,6 +131,7 @@ CoTryTask<void> Inode::store(IReadWriteTransaction &txn) const {
   }
 
   auto key = packKey();
+  // 获取meta.Inode对象并序列化
   auto value = serde::serialize(data());
   if (auto result = co_await txn.set(key, value); result.hasError()) {
     XLOGF(ERR, "Failed to store inode {}, error {}", id, result.error());

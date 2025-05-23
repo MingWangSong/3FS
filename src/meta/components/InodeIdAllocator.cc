@@ -41,6 +41,8 @@ CoTryTask<meta::InodeId> InodeIdAllocator::allocateSlow(std::chrono::microsecond
 }
 
 CoTask<void> InodeIdAllocator::allocateFromDB() {
+  
+  // 从FoundationDB获取高52位基础值 IdAllocator
   auto result = co_await allocator_.allocate();
   if (UNLIKELY(result.hasError())) {
     XLOGF(CRITICAL, "Failed to allocate InodeId {}", result.error().describe());
@@ -53,12 +55,14 @@ CoTask<void> InodeIdAllocator::allocateFromDB() {
     XLOGF(FATAL, "64bit InodeId used up, should never happen, {}!!!", result.value());
   }
 
+  // 左移12位，取低40位
   auto first = result.value() << kAllocatorShift;
   XLOGF(DBG,
         "Get {} from IdAllocator, corresponding to InodeId {} - {}",
         result.value(),
         meta::InodeId(first),
         meta::InodeId(first + kAllocateBatch - 1));
+  // 低12位依次累加，组成InodeId，递增生成4096个连续ID
   for (uint64_t i = 0; i < kAllocateBatch; i++) {
     meta::InodeId id(first + i);
     co_await queue_.enqueue(id);

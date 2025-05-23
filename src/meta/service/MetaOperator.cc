@@ -57,7 +57,7 @@
 #include "meta/store/Utils.h"
 #include "meta/store/ops/BatchOperation.h"
 
-#define AUTHENTICATE(user)                             \
+#define AUTHENTICATE(user)                              \
   do {                                                 \
     if (config_.authenticate()) {                      \
       CO_RETURN_ON_ERROR(co_await authenticate(user)); \
