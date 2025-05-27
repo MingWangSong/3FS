@@ -126,6 +126,7 @@ Result<Void> Listener::start(ServiceGroup &group) {
       return makeError(RPCCode::kIBDeviceNotInitialized);
     }
     auto accept = [this](auto socket) { acceptRDMA(std::move(socket)); };
+    // RDMA连接建立需要先通过TCP交换连接参数，即使用TCP作为控制通道，所以指定类型为TCP
     auto service = std::make_unique<IBConnectService>(ibconfig_, accept, config_.rdma_accept_timeout_getter());
     group.addSerdeService(std::move(service), Address::Type::TCP);
   }
@@ -199,6 +200,7 @@ CoTask<void> Listener::acceptTCP(std::unique_ptr<folly::coro::Transport> tr) {
   co_return;
 }
 
+// 建立RDMA连接
 void Listener::acceptRDMA(std::unique_ptr<IBSocket> socket) {
   auto result = ioWorker_.addIBSocket(std::move(socket));
   if (result.hasError()) {

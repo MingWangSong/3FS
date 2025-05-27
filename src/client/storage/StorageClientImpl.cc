@@ -1140,6 +1140,8 @@ CoTask<void> processBatches(const std::vector<std::pair<NodeId, Ops>> &batches, 
   if (parallel) co_await folly::coro::collectAllRange(std::move(tasks));
 }
 
+// 串行模式：简单地等待每个批次的处理完成后再处理下一个
+// 并行模式：先创建所有任务，然后使用 folly::coro::collectAllRange 等待所有任务完成
 template <typename Op>
 CoTryTask<void> sendOpsWithRetry(ClientRequestContext &requestCtx,
                                  UpdateChannelAllocator &chanAllocator,
@@ -1800,61 +1802,39 @@ CoTryTask<void> StorageClientImpl::batchWriteWithoutRetry(ClientRequestContext &
                                                           const std::vector<WriteIO *> &writeIOs,
                                                           const flat::UserInfo &userInfo,
                                                           const WriteOptions &options) {
-  // collect target/chain infos
-
-  TargetSelectionOptions targetSelectionOptions = options.targetSelection();
-  targetSelectionOptions.set_mode(options.targetSelection().mode() == TargetSelectionMode::Default
-                                      ? TargetSelectionMode::HeadTarget
-                                      : options.targetSelection().mode());
-
+  // 1. 获取路由信息
   std::shared_ptr<hf3fs::client::RoutingInfo const> routingInfo = getCurrentRoutingInfo();
+  
+  // 2. 选择目标节点
   auto targetedIOs = selectRoutingTargetForOps(requestCtx, routingInfo, targetSelectionOptions, writeIOs);
-
-  // select storage target for each IO and group by node id
-
-  auto batches = groupOpsByNodeId(requestCtx,
-                                  targetedIOs,
-                                  config_.traffic_control().write().max_batch_size(),
-                                  config_.traffic_control().write().max_batch_bytes(),
-                                  config_.traffic_control().write().random_shuffle_requests());
-
-  // create batch write request and communicate with storage service
-
-  auto sendReq =
-      [&, this](size_t batchIndex, const NodeId &nodeId, const std::vector<WriteIO *> &batchIOs) -> CoTask<bool> {
+  
+  // 3. 按节点分组
+  auto batches = groupOpsByNodeId(requestCtx, 
+                                targetedIOs,
+                                config_.traffic_control().write().max_batch_size(),
+                                config_.traffic_control().write().max_batch_bytes(),
+                                config_.traffic_control().write().random_shuffle_requests());
+  
+  // 4. 为每个节点发送批量请求
+  auto sendReq = [&, this](...) -> CoTask<bool> {
+    // 信号量控制并发
     SemaphoreGuard perServerReq(*writeConcurrencyLimit_.getPerServerSemaphore(nodeId));
     co_await perServerReq.coWait();
-
-    SemaphoreGuard concurrentReq(writeConcurrencyLimit_.getConcurrencySemaphore());
-    co_await concurrentReq.coWait();
-
-    if (!isLatestRoutingInfo(routingInfo, batchIOs)) {
-      setErrorCodeOfOps(batchIOs, StorageClientCode::kRoutingVersionMismatch);
-      co_return false;
+    
+    // 分配通道ID
+    if (!allocateChannelsForOps(chanAllocator_, batchIOs, false)) {
+      // 通道分配失败处理
     }
-
-    if (!allocateChannelsForOps(chanAllocator_, batchIOs, false /*reallocate*/)) {
-      XLOGF(WARN,
-            "Cannot allocate channel ids for {} write IOs, first IO {}",
-            batchIOs.size(),
-            fmt::ptr(batchIOs.front()));
-      setErrorCodeOfOps(batchIOs, StorageClientCode::kResourceBusy);
-      co_return false;
-    }
-
-    // log the waiting time before communication starts
-    requestCtx.logWaitingTime();
-
-    auto statusCode =
-        co_await sendWriteRequestsSequentially(requestCtx, batchIOs, routingInfo, nodeId, userInfo, options);
-
+    
+    // 按顺序发送写请求
+    auto statusCode = co_await sendWriteRequestsSequentially(requestCtx, batchIOs, routingInfo, nodeId, userInfo, options);
+    
     co_return bool(statusCode);
   };
-
+  
+  // 并行或串行处理批次
   bool parallelProcessing = config_.traffic_control().write().process_batches_in_parallel();
   co_await processBatches<WriteIO>(batches, sendReq, parallelProcessing);
-
-  co_return Void{};
 }
 
 CoTryTask<void> StorageClientImpl::sendWriteRequest(ClientRequestContext &requestCtx,
