@@ -5,6 +5,7 @@
 
 namespace hf3fs::storage {
 
+// 3代表serviceID；下面的1、2、3.。。代表methodID
 SERDE_SERVICE(StorageSerde, 3) {
   SERDE_SERVICE_METHOD(batchRead, 1, BatchReadReq, BatchReadRsp);
   SERDE_SERVICE_METHOD(write, 2, WriteReq, WriteRsp);

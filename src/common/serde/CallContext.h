@@ -34,6 +34,7 @@ class CallContext {
 
   CoTask<void> handle() {
     auto method = service_.getter(packet_.methodId);
+    // 实际调用CallContext::call<WriteMethodInfo>()
     co_await (this->*method)();
   }
 

@@ -71,6 +71,7 @@ hf3fs::Result<Void> PioV::addWrite(size_t idx,
   }
 
   size_t bufOff = 0;
+ // 调用chunkIo将大的写请求拆分成块级操作
   RETURN_ON_ERROR(chunkIo(inode,
                           track,
                           off,
@@ -115,6 +116,7 @@ Result<Void> PioV::chunkIo(
 
     auto chain = f.getChainId(inode, opOff, *routingInfo_, track);
     RETURN_ON_ERROR(chain);
+    // 由 inodeID+分片ID+chunkID 组成
     auto fchunk = f.getChunkId(inode.id, opOff);
     RETURN_ON_ERROR(fchunk);
     auto chunk = storage::ChunkId(*fchunk);

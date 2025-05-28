@@ -847,6 +847,7 @@ CoTryTask<Rsp> StorageClientImpl::callMessengerMethod(StorageMessenger &messenge
         auto response =
             FAULT_INJECTION_POINT(requestCtx.debugFlags.injectClientError(),
                                   makeError(StorageClientCode::kCommError),
+                                  // 调用了 messenger 对象的一个方法（由 Method 指定）
                                   (co_await std::invoke(Method, messenger, address, request, &options, &timestamp)));
 
         XLOGF_IF(WARN,
@@ -1140,8 +1141,7 @@ CoTask<void> processBatches(const std::vector<std::pair<NodeId, Ops>> &batches, 
   if (parallel) co_await folly::coro::collectAllRange(std::move(tasks));
 }
 
-// 串行模式：简单地等待每个批次的处理完成后再处理下一个
-// 并行模式：先创建所有任务，然后使用 folly::coro::collectAllRange 等待所有任务完成
+// 确保操作在面对临时性故障时能够自动重试，提高系统稳定性。
 template <typename Op>
 CoTryTask<void> sendOpsWithRetry(ClientRequestContext &requestCtx,
                                  UpdateChannelAllocator &chanAllocator,
