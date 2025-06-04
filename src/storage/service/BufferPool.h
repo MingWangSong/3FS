@@ -78,7 +78,9 @@ class BufferPool {
   ConstructLog<"storage::BufferPool"> constructLog_;
   const Config &config_;
   Size rdmabufSize_;
+  // RDMA缓冲区
   std::vector<net::RDMABuf> buffers_;
+  // 每个iovec结构一一对应一个RDMA缓冲区， 保存缓冲区的内存地址和大小信息
   std::vector<struct iovec> iovecs_;
   folly::fibers::Semaphore semaphore_;
   folly::Synchronized<std::vector<BufferIndex>, std::mutex> freeIndex_;

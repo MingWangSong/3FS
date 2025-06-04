@@ -28,6 +28,7 @@ void alignBuffer(net::RDMABuf &rdmabuf) {
 
 Result<Void> BufferPool::init(CPUExecutorGroup &executor) {
   buffers_.clear();
+  // 现代 Linux 系统中，UIO_MAXIOV 的值为 1024， 定义在/usr/include/Linux/uio.h下
   buffers_.reserve(UIO_MAXIOV);
 
   auto smallBufferResult =

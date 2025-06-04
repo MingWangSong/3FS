@@ -38,6 +38,7 @@ Result<Void> DynamicCoroutinesPool::stopAndJoin() {
 Result<Void> DynamicCoroutinesPool::setCoroutinesNum(uint32_t num) {
   auto lock = std::unique_lock(mutex_);
   if (executor_.numThreads() != config_.threads_num()) {
+    // 设置线程池线程数量
     executor_.setNumThreads(config_.threads_num(), true);
   }
 

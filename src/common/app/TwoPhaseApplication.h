@@ -105,7 +105,7 @@ namespace hf3fs {
       app_detail::initConfig(config_, configFlags_, appInfo_, [this] { return launcher_->loadConfigTemplate(); });
       XLOGF(INFO, "Server config inited");
 
-      // 初始化通用组件
+      // 初始化日志+监控组件（所有服务通用）
       app_detail::initCommonComponents(config_.common(), Server::kName, appInfo_.nodeId);
 
       // 设置日志和内存配置更新回调
@@ -187,6 +187,7 @@ namespace hf3fs {
      */
     Result<Void> initServer() {
       server_ = std::make_unique<Server>(config_.server());
+      // 在net::server中初始化ServiceGroup
       RETURN_ON_ERROR(server_->setup());
       XLOGF(INFO, "{}", server_->describe());
       return Void{};
@@ -199,6 +200,7 @@ namespace hf3fs {
      * 通过launcher启动服务器，并更新应用信息
      */
     Result<Void> startServer() {
+      // 最终调用net::Server::start
       auto startResult = launcher_->startServer(*server_, appInfo_);
       XLOGF_IF(FATAL, !startResult, "Start server failed: {}", startResult.error());
       appInfo_ = server_->appInfo();

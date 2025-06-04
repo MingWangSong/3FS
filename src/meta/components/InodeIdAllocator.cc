@@ -25,6 +25,7 @@
 
 namespace hf3fs::meta::server {
 
+// "SNGL-inode-alloc"
 std::string InodeIdAllocator::kAllocatorKeyPrefix = fmt::format("{}-inode-alloc", kv::toStr(kv::KeyPrefix::Single));
 
 CoTryTask<meta::InodeId> InodeIdAllocator::allocateSlow(std::chrono::microseconds timeout) {
@@ -42,7 +43,7 @@ CoTryTask<meta::InodeId> InodeIdAllocator::allocateSlow(std::chrono::microsecond
 
 CoTask<void> InodeIdAllocator::allocateFromDB() {
   
-  // 从FoundationDB获取高52位基础值 IdAllocator
+  // 从FoundationDB获取高64位基础值 IdAllocator
   auto result = co_await allocator_.allocate();
   if (UNLIKELY(result.hasError())) {
     XLOGF(CRITICAL, "Failed to allocate InodeId {}", result.error().describe());
@@ -55,7 +56,7 @@ CoTask<void> InodeIdAllocator::allocateFromDB() {
     XLOGF(FATAL, "64bit InodeId used up, should never happen, {}!!!", result.value());
   }
 
-  // 左移12位，取低40位
+  // 左移12位，取低52位
   auto first = result.value() << kAllocatorShift;
   XLOGF(DBG,
         "Get {} from IdAllocator, corresponding to InodeId {} - {}",

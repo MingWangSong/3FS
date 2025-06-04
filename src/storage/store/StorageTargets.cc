@@ -32,6 +32,7 @@ Result<Void> StorageTargets::init(CPUExecutorGroup &executor) {
     deviceIdToManufacturer[info.deviceId] = info.manufacturer;
   }
 
+  // targetPaths_为节点SSD目录
   targetPaths_ = config_.target_paths();
   for (auto &path : targetPaths_) {
     struct stat st;
@@ -41,6 +42,7 @@ Result<Void> StorageTargets::init(CPUExecutorGroup &executor) {
       XLOG(ERR, msg);
       return makeError(StorageCode::kStorageStatFailed, std::move(msg));
     }
+    // 设备ID获取对应的制造商信息
     manufacturers_.push_back(deviceIdToManufacturer[st.st_dev]);
   }
 
@@ -49,6 +51,7 @@ Result<Void> StorageTargets::init(CPUExecutorGroup &executor) {
     pathToDiskIndex_[path] = i++;
   }
 
+  // 为每个目标路径创建一个块引擎实例
   std::vector<folly::coro::TaskWithExecutor<Result<rust::Box<chunk_engine::Engine>>>> tasks;
   for (auto &path : targetPaths_) {
     auto engine_path = path / "engine";

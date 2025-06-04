@@ -110,6 +110,7 @@ CoTask<IOResult> ReliableForwarding::forward(const UpdateReq &req,
                                              TargetPtr &target,
                                              CommitIO &commitIO,
                                              std::chrono::milliseconds timeout) {
+  // 无可转发节点则返回（尾节点）
   if (!target->successor.has_value()) {
     // use the latest chain version.
     commitIO.commitChainVer = target->vChainId.chainVer;

@@ -914,6 +914,7 @@ int IBSocket::postRecv(uint32_t idx) {
   return ret;
 }
 
+// 该函数支持批量RDMA读和写操作，通过参数opcode来区分操作类型
 CoTryTask<void> IBSocket::rdmaBatch(ibv_wr_opcode opcode,
                                     const std::span<const RDMAReq> reqs,
                                     const std::span<RDMABuf> localBufs,

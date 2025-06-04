@@ -136,6 +136,7 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
   aioTotalAlignedLength.addSample(totalLength + totalHeadLength + totalTailLength);
   prepareTargetRecordGuard.report(true);
 
+  // 缓冲区分配
   auto prepareBufferRecordGuard = storageReadPrepareBuffer.record();
   auto buffer = components_.rdmabufPool.get();
   for (AioReadJobIterator it(&batch); it; it++) {
@@ -163,6 +164,7 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
     auto recordGuard = storageAioEnqueueRecorder.record();
     auto splitSize = config_.batch_read_job_split_size();
     for (uint32_t start = 0; start < batchSize; start += splitSize) {
+      // 异步提交任务
       co_await components_.aioReadWorker.enqueue(AioReadJobIterator(&batch, start, splitSize));
     }
     recordGuard.report(true);
@@ -170,12 +172,15 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
 
   auto waitAioAndPostRecordGuard = storageWaitAioAndPostRecorder.record();
   auto waitAioRecordGuard = storageWaitAioRecorder.record();
+  // 等待IO完成
   co_await batch.complete();
   waitAioRecordGuard.report(true);
 
   if (BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::SEND_DATA_INLINE)) {
+    // 响应消息体携带数据返回
     batch.copyToRespBuffer(rsp.inlinebuf.data);
   } else if (!BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::BYPASS_RDMAXMIT)) {
+    // 通过RDMA返回数据
     auto ibSocket = ctx.transport()->ibSocket();
     if (UNLIKELY(ibSocket == nullptr)) {
       XLOGF(ERR, "batch read no RDMA socket");
@@ -213,6 +218,7 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
     }
 
     auto waitPostRecordGuard = storageWaitPostRecorder.record(ibdevTagSet);
+    // RDMA传输数据
     auto postResult = FAULT_INJECTION_POINT(requestCtx.debugFlags.injectServerError(),
                                             makeError(RPCCode::kRDMAPostFailed),
                                             (co_await writeBatch.post()));
@@ -386,6 +392,7 @@ CoTask<IOResult> StorageOperator::handleUpdate(ServiceRequestContext &requestCtx
   // 3. update local target.
   auto buffer = components_.rdmabufPool.get();
   net::RDMARemoteBuf remoteBuf;
+  // 更新数据
   auto updateResult = co_await doUpdate(requestCtx,
                                         req.payload,
                                         req.options,
@@ -441,6 +448,7 @@ CoTask<IOResult> StorageOperator::handleUpdate(ServiceRequestContext &requestCtx
   commitIO.commitVer = updateResult.updateVer;
   commitIO.isRemove = req.payload.isRemove();
 
+  // 转发下一个节点，阻塞模型（需要所有后继节点返回）
   auto forwardResult = co_await components_.reliableForwarding
                            .forwardWithRetry(requestCtx, req, remoteBuf, chunkEngineJob, target, commitIO);
   if (UNLIKELY(commitIO.commitVer != updateResult.updateVer)) {
@@ -524,8 +532,10 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
                                            ChunkEngineUpdateJob &chunkEngineJob,
                                            bool allowToAllocate) {
   auto recordGuard = storageDoUpdateRecorder.record();
+  // 构造updateJob
   UpdateJob job(requestCtx, updateIO, updateOptions, chunkEngineJob, target, allowToAllocate);
 
+  // 内联数据处理，即请求体中包含数据
   if (BITFLAGS_CONTAIN(featureFlags, FeatureFlags::SEND_DATA_INLINE)) {
     if (updateIO.inlinebuf.data.size() != updateIO.length) {
       auto msg = fmt::format("[BUG] Inline buffer size {} not equal to update size {}, io: {}",

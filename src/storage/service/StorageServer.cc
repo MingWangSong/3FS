@@ -24,8 +24,10 @@ StorageServer::~StorageServer() {
 }
 
 Result<Void> StorageServer::beforeStart() {
+  // 为 ServiceGroup 配置各自指定的Service
   RETURN_AND_LOG_ON_ERROR(addSerdeService(std::make_unique<StorageService>(components_.storageOperator), true));
   RETURN_AND_LOG_ON_ERROR(addSerdeService(std::make_unique<core::CoreService>()));
+  // 为processor.配置的协程选择器
   groups().front()->setCoroutinesPoolGetter([this](const serde::MessagePacket<> &packet) -> DynamicCoroutinesPool & {
     switch (packet.serviceId) {
       case StorageSerde<>::kServiceID:
