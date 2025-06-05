@@ -64,7 +64,7 @@ Result<Void> AioReadWorker::run(AioStatus &aioStatus, IoUringStatus &ioUringStat
   while (true) {
     // 1. try to fetch a batch read job.
     aioRunningThreadsCount.addSample(-1);
-    auto it = queue_.dequeue();  // waiting.
+    auto it = queue_.dequeue();  // waiting. 阻塞等待任务
     aioRunningThreadsCount.addSample(1);
     if (it.isNull()) {
       XLOGF(DBG, "Stop AioReadWorker {}...", fmt::ptr(this));

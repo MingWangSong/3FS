@@ -196,6 +196,7 @@ Result<Void> StorageTargets::create(const CreateTargetReq &req) {
   return Void{};
 }
 
+// 不负责创建Target目录，它只是扫描并加载已存在
 Result<Void> StorageTargets::load(CPUExecutorGroup &executor) {
   RETURN_AND_LOG_ON_ERROR(init(executor));
   std::vector<folly::coro::TaskWithExecutor<Result<Void>>> tasks;
