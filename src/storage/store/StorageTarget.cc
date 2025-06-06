@@ -87,7 +87,9 @@ StorageTarget::~StorageTarget() {
 }
 
 Result<Void> StorageTarget::create(const PhysicalConfig &config) {
+  // 配置文件/Diskpath/targetId/target.toml
   Path targetConfigFilePath = config.path / kPhysicalConfigFileName;
+  // 配置文件存在则验证
   if (boost::filesystem::exists(targetConfigFilePath)) {
     auto msg = fmt::format("Target config file {} already exists", targetConfigFilePath.string());
     XLOG(INFO, msg);
@@ -120,6 +122,7 @@ Result<Void> StorageTarget::create(const PhysicalConfig &config) {
   } else {
     targetConfig_.kv_path = kvPath;
   }
+  
   if (useChunkEngine()) {
     boost::system::error_code ec{};
     boost::filesystem::create_directories(targetConfig_.path, ec);
@@ -129,6 +132,7 @@ Result<Void> StorageTarget::create(const PhysicalConfig &config) {
       return makeError(StorageCode::kChunkOpenFailed, std::move(msg));
     }
   } else {
+    // 创建ChunkStore结构
     RETURN_AND_LOG_ON_ERROR(chunkStore_.create(targetConfig_));
   }
 
@@ -141,6 +145,7 @@ Result<Void> StorageTarget::create(const PhysicalConfig &config) {
     RETURN_AND_LOG_ON_ERROR(getDeviceUUIDResult);
   }
 
+  // 写入配置文件
   std::ofstream targetConfigFile(targetConfigFilePath, std::ios::out);
   if (!targetConfigFile) {
     auto msg = fmt::format("Open target config file {} failed", targetConfigFilePath.string());

@@ -104,6 +104,7 @@ Result<Void> StorageTargets::create(const CreateConfig &createConfig) {
   size_t idx = 0;
   for (auto &targetId : createConfig.target_ids()) {
     auto diskIndex = idx / targetNumPerPath;
+    // 创建StorageTarget实例
     auto storageTarget = StorageTarget::enable_shared_from_this::create(config_.storage_target(),
                                                                         globalFileStore_,
                                                                         diskIndex,
