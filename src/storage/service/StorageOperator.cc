@@ -553,6 +553,7 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
       co_return makeError(StatusCode::kInvalidArg, std::move(msg));
     }
 
+    // 尝试从缓冲池中分配足够大小的内存
     auto allocateResult = buffer.tryAllocate(updateIO.rdmabuf.size());
     if (UNLIKELY(!allocateResult)) {
       allocateResult = co_await buffer.allocate(updateIO.rdmabuf.size());
@@ -566,6 +567,7 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
       co_return makeError(RPCCode::kRDMANoBuf, std::move(msg));
     }
     job.state().data = allocateResult->ptr();
+    // 将本地缓冲区转换为远程缓冲区描述符
     remoteBuf = allocateResult->toRemoteBuf();
     if (!BITFLAGS_CONTAIN(featureFlags, FeatureFlags::BYPASS_RDMAXMIT)) {
       auto readBatch = ibSocket->rdmaReadBatch();
@@ -591,6 +593,7 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
       waitSemRecordGuard.report(true);
 
       auto waitPostRecordGuard = storageWriteWaitPostRecorder.record(ibdevTagSet);
+      // 发送RDMA读取请求
       auto postResult = co_await readBatch.post();
       if (UNLIKELY(!postResult)) {
         XLOGF(ERR, "write post RDMA failed, req {}, error {}", updateIO, postResult.error());

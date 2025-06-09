@@ -51,7 +51,7 @@ Result<Void> StorageTargets::init(CPUExecutorGroup &executor) {
     pathToDiskIndex_[path] = i++;
   }
 
-  // 为每个目标路径创建一个块引擎实例
+  // 为每个目标路径创建一个chunk_engine实例，目录在/targetPath/engine下
   std::vector<folly::coro::TaskWithExecutor<Result<rust::Box<chunk_engine::Engine>>>> tasks;
   for (auto &path : targetPaths_) {
     auto engine_path = path / "engine";

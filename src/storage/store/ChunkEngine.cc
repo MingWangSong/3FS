@@ -12,6 +12,8 @@ monitor::OperationRecorder storageCommitRecorder{"storage.engine_commit"};
 
 }  // namespace
 
+
+// 数据块chunk的更新操作
 Result<uint32_t> ChunkEngine::update(chunk_engine::Engine &engine, UpdateJob &job) {
   auto recordGuard = storageUpdateRecorder.record();
 
@@ -28,7 +30,7 @@ Result<uint32_t> ChunkEngine::update(chunk_engine::Engine &engine, UpdateJob &jo
   key.append((const char *)&chainId, sizeof(chainId));
   key.append(chunkId.data());
 
-  // 2. start update.
+  // 2. start update. 构建请求
   chunk_engine::UpdateReq req{};
   if (updateIO.isTruncate()) {
     req.is_truncate = true;
@@ -43,6 +45,8 @@ Result<uint32_t> ChunkEngine::update(chunk_engine::Engine &engine, UpdateJob &jo
   } else if (state.data) {
     req.without_checksum = true;
   }
+
+  // 设置数据和位置信息
   if (updateIO.isWrite()) {
     req.length = updateIO.length;
     req.offset = updateIO.offset;
@@ -50,6 +54,8 @@ Result<uint32_t> ChunkEngine::update(chunk_engine::Engine &engine, UpdateJob &jo
     req.length = 0;
     req.offset = updateIO.length;
   }
+
+  // 设置数据指针
   req.data = reinterpret_cast<uint64_t>(state.data);
   req.last_request_id = job.requestCtx().tag.requestId;
   auto clientId = job.requestCtx().tag.clientId.uuid.asStringView();
@@ -79,6 +85,11 @@ Result<uint32_t> ChunkEngine::update(chunk_engine::Engine &engine, UpdateJob &jo
   return updateIO.length;
 }
 
+
+/*提交存储引擎元数据操作
+  engine: Rust实现的Chunk Engine实例
+  job: 包含待提交数据的更新任务
+ */
 Result<uint32_t> ChunkEngine::commit(chunk_engine::Engine &engine, UpdateJob &job, bool sync) {
   auto recordGuard = storageCommitRecorder.record();
 
@@ -86,6 +97,7 @@ Result<uint32_t> ChunkEngine::commit(chunk_engine::Engine &engine, UpdateJob &jo
   const auto &chunkId = commitIO.key.chunkId;
   auto &result = job.result();
 
+  // 构建存储键 （chainId + chunkId）
   auto chainId = commitIO.key.vChainId.chainId;
   std::string key;
   key.reserve(sizeof(chainId) + chunkId.data().size());
