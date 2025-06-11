@@ -276,15 +276,17 @@ CoTask<void> FuseClients::ioRingWorker(int i, int ths) {
   while (true) {
     auto res = co_await folly::coro::co_awaitTry([this, &checkHigher, i, ths]() -> CoTask<void> {
       IoRingJob job;
+      // 优先级划分
       auto hiThs = config->io_worker_coros().hi(), loThs = config->io_worker_coros().lo();
       auto prio = i < hiThs ? 0 : i < (ths - loThs) ? 1 : 2;
-      if (!config->enable_priority()) {
+      if (!config->enable_priority()) {  // 1、直接根据优先级获取队列
         job = co_await iojqs[prio]->co_dequeue();
-      } else {
+      } else {  // 2、优先级队列智能调度
         bool gotJob = false;
 
         // if checkHigher, dequeue from a higher job queue if it is full
         while (!gotJob) {
+          // 从高优先级已满队列"偷取"任务
           if (checkHigher) {
             for (int nprio = 0; nprio < prio; ++nprio) {
               if (iojqs[nprio]->full()) {
@@ -304,6 +306,7 @@ CoTask<void> FuseClients::ioRingWorker(int i, int ths) {
             }
           }
 
+          // 动态优先级扫描
           // if checkHigher, check from higher prio to lower; otherwise, reverse the checking direction
           for (int nprio = checkHigher ? 0 : prio; checkHigher ? nprio <= prio : nprio >= 0;
                nprio += checkHigher ? 1 : -1) {
@@ -328,6 +331,8 @@ CoTask<void> FuseClients::ioRingWorker(int i, int ths) {
       }
 
       while (true) {
+
+        // 查找对应的索引节点
         auto lookupFiles =
             [this](std::vector<std::shared_ptr<RcInode>> &ins, const IoArgs *args, const IoSqe *sqes, int sqec) {
               auto lastIid = 0ull;
@@ -346,6 +351,8 @@ CoTask<void> FuseClients::ioRingWorker(int i, int ths) {
                 ins.push_back(it == inodes.end() ? (std::shared_ptr<RcInode>()) : it->second);
               }
             };
+        
+        // 查找缓冲区信息
         auto lookupBufs =
             [this](std::vector<Result<lib::ShmBufForIO>> &bufs, const IoArgs *args, const IoSqe *sqe, int sqec) {
               auto lastId = Uuid::zero();
@@ -385,6 +392,7 @@ CoTask<void> FuseClients::ioRingWorker(int i, int ths) {
               }
             };
 
+        // 处理IO
         co_await job.ior->process(job.sqeProcTail,
                                   job.toProc,
                                   *storageClient,
@@ -421,6 +429,7 @@ CoTask<void> FuseClients::ioRingWorker(int i, int ths) {
 
 void FuseClients::watch(int prio, std::stop_token stop) {
   while (!stop.stop_requested()) {
+    // 时间处理与等待机制
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) < 0) {
       continue;
@@ -433,6 +442,7 @@ void FuseClients::watch(int prio, std::stop_token stop) {
       continue;
     }
 
+    // 任务发现与分发
     auto gotJobs = false;
     do {
       gotJobs = false;

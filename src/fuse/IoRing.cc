@@ -31,6 +31,8 @@ std::vector<IoRingJob> IoRing::jobsToProc(int maxJobs) {
   
   while (sqes && (int)jobs.size() < maxJobs) {
     int toProc;
+
+    // 计算待处理的IO数量toProc
     if (ioDepth > 0) {
       // 固定批处理大小模式
       toProc = ioDepth;
@@ -159,8 +161,10 @@ CoTask<void> IoRing::process(
     // 查找相关的内存缓冲区
     std::vector<Result<lib::ShmBufForIO>> bufs;
     bufs.reserve(toProc);
+    // 在sqe环中获取bufs
     lookupBufs(bufs, ringSection, sqeSection + spt, std::min(toProc, entries - spt));
     if ((int)bufs.size() < toProc) {
+      // 有一部分在环的起始位置
       lookupBufs(bufs, ringSection, sqeSection, toProc - (int)bufs.size());
     }
 
@@ -214,7 +218,7 @@ CoTask<void> IoRing::process(
         continue;
       }
 
-      // 写操作前的准备
+      // 写操作前的准备：计算条带，拓展条带
       if (!forRead_) {
         auto beginWrite =
             co_await inodes[i]->beginWrite(userInfo_, *getFuseClientsInstance().metaClient, args.fileOff, args.ioLen);
@@ -245,7 +249,7 @@ CoTask<void> IoRing::process(
     distinctFilesDist.addSample(distinctFiles.size(), monitor::TagSet{{"io", ioType}, {"uid", uids}});
     distinctBufsDist.addSample(distinctBufs.size(), monitor::TagSet{{"io", ioType}, {"uid", uids}});
 
-    // 设置读操作选项
+    // 设置读操作配置参数 “storage_io.read”
     auto readOpt = storageIo.read();
     if (flags_ & HF3FS_IOR_ALLOW_READ_UNCOMMITTED) {
       readOpt.set_allowReadUncommitted(true);

@@ -86,6 +86,7 @@ namespace hf3fs::fuse {
      */
     static size_t bytesRequired(int entries) {
       auto n = ringMarkerSize();
+      // 每个条目包含参数(IoArgs)、完成队列条目(IoCqe)和提交队列条目(IoSqe)
       return n * 4 + sizeof(sem_t) + (sizeof(IoArgs) + sizeof(IoCqe) + sizeof(IoSqe)) * (entries + 1) + 4096;
     }
 
@@ -254,6 +255,7 @@ namespace hf3fs::fuse {
     std::unique_ptr<sem_t, std::function<void(sem_t *)>> cqeSem{nullptr, [](sem_t *p) { sem_destroy(p); }};
 
   public:
+    // 用于跟踪和管理 IO 环（io_uring）中可用的槽位
     AvailSlots slots;
 
   private:

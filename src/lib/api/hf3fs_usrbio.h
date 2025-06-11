@@ -16,14 +16,14 @@ typedef void *hf3fs_iov_handle;
 // also as the base buffer for ior
 // however, if you already has a shared buffer, skip hf3fs_iovwrap() and go for hf3fs_iorwrap() directly
 struct hf3fs_iov {
-  uint8_t *base;
-  hf3fs_iov_handle iovh;
+  uint8_t *base;         // 缓冲区基地址指针
+  hf3fs_iov_handle iovh; // IO向量句柄
 
-  char id[16];
-  char mount_point[256];
-  size_t size;
-  size_t block_size;
-  int numa;
+  char id[16];           // 唯一标识符
+  char mount_point[256]; // 文件系统挂载点路径
+  size_t size;           // 缓冲区总大小
+  size_t block_size;     // 块大小
+  int numa;              // NUMA节点标识
 };
 
 typedef void *hf3fs_ior_handle;

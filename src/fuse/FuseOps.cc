@@ -2670,10 +2670,8 @@ CoTryTask<uint64_t> RcInode::beginWrite(flat::UserInfo userInfo,
                                         uint64_t offset,
                                         uint64_t length) {
   // 计算需要的stripe数量
-  // 1. 根据offset和length计算需要的chunk数量
+  // 1. 根据offset和length计算需要的chunk数量（通过offset+length除以chunkSize并向上取整）
   // 2. 取chunk数量和最大stripe数量的较小值
-  // 计算所需的stripe数量：
-  // 1. 计算操作后的文件总大小需要多少个chunk（通过offset+length除以chunkSize并向上取整）
   auto stripe = std::min((uint32_t)folly::divCeil(offset + length, (uint64_t)inode.asFile().layout.chunkSize), inode.asFile().layout.stripeSize);
   {
     auto guard = dynamicAttr.rlock();
@@ -2696,6 +2694,7 @@ CoTryTask<uint64_t> RcInode::beginWrite(flat::UserInfo userInfo,
     }
   }
 
+  // 扩展条带
   auto res = co_await meta.extendStripe(userInfo, inode.id, stripe);
   CO_RETURN_ON_ERROR(res);
 
@@ -2721,6 +2720,7 @@ void RcInode::finishWrite(flat::UserInfo userInfo, uint64_t truncateVer, uint64_
   guard->written++;
   guard->hintLength = meta::VersionedLength::mergeHint(guard->hintLength, newHint);
   guard->mtime = UtcClock::now();
+  // 标记脏inode，等待刷新
   getFuseClientsInstance().dirtyInodes.lock()->insert(inode.id);
 }
 

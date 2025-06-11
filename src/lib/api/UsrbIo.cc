@@ -108,6 +108,7 @@ int hf3fs_extract_mount_point(char *hf3fs_mount_point, int size, const char *pat
   return -1;
 }
 
+// 创建共享内存区域
 int hf3fs_iovcreate_general(struct hf3fs_iov *iov,
                             const char *hf3fs_mount_point,
                             size_t size,
@@ -130,8 +131,10 @@ int hf3fs_iovcreate_general(struct hf3fs_iov *iov,
 
   auto p = fmt::format("/hf3fs-iov-{}", hf3fs::Uuid::random());
 
+  // 指向共享内存缓冲区对象的指针变量
   hf3fs::lib::ShmBuf *shm;
   try {
+    // 系统共享内存区域(/dev/shm)创建内存段
     shm = new hf3fs::lib::ShmBuf(p, size, block_size, numa, hf3fs::meta::Uid(getuid()), getpid(), getppid());
   } catch (const std::runtime_error &e) {
     XLOGF(ERR, "failed to create/map shm for iov {}", e.what());
@@ -154,15 +157,18 @@ int hf3fs_iovcreate_general(struct hf3fs_iov *iov,
                           is_io_ring && priority != 0 ? fmt::format(".p{}", priority < 0 ? 'h' : 'l') : std::string(),
                           is_io_ring ? fmt::format(".t{}", timeout) : std::string(),
                           is_io_ring && flags != 0 ? fmt::format(".f{:b}", flags) : std::string());
+  // 在3fs-virt目录下构建符号链接路径
   auto lres = symlink(target.c_str(), link.c_str());
   if (lres < 0) {
     XLOGF(ERR, "failed to register iov '{}' to hf3fs '{}'", target, link);
     return -errno;
   }
   if (is_io_ring) {
+    // 立即解除链接， 防止其他进程意外访问这个共享内存文件
     shm->maybeUnlinkShm();
   }
 
+  // 填充IOV结构
   iov->base = shm->bufStart;
   iov->iovh = shm;
   memcpy(iov->id, shm->id.data, sizeof(iov->id));
@@ -478,6 +484,10 @@ int hf3fs_iorcreate3(struct hf3fs_ior *ior,
   return 0;
 }
 
+/*初始化ior
+  entries: I/O环中可以并发处理的I/O请求数量上限
+  io_depth: I/O批处理深度
+*/
 int hf3fs_iorcreate4(struct hf3fs_ior *ior,
                      const char *hf3fs_mount_point,
                      int entries,
@@ -490,6 +500,7 @@ int hf3fs_iorcreate4(struct hf3fs_ior *ior,
     return -EINVAL;
   }
 
+  // 借用iov申请共享内存的操作，给ior申请共享内存
   auto iov_size = hf3fs_ior_size(entries);
   auto res = hf3fs_iovcreate_general(&ior->iov,
                                      hf3fs_mount_point,
@@ -626,6 +637,7 @@ int hf3fs_prep_io(const struct hf3fs_ior *ior,
                   size_t off,
                   uint64_t len,
                   const void *userdata) {
+  // 写入数据在iov中的位置
   auto p = (uint8_t *)ptr;
   auto afd = abs(fd);
   if (!ior || !ior->iorh || read != ior->for_read || !iov || len <= 0 || !iov->base || p < iov->base ||
@@ -646,6 +658,7 @@ int hf3fs_prep_io(const struct hf3fs_ior *ior,
   auto &iorh = *(Hf3fsIorHandle *)ior->iorh;
   auto &ring = *iorh.ior;
 
+  // 获取io_ring中可用的slot位置
   auto idx = ring.slots.alloc();
   if (!idx) {  // ring is full
     return -EAGAIN;
